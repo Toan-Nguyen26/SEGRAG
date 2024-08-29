@@ -1,0 +1,16 @@
+numpy
+tensorflow
+gensim
+ipython
+tqdm
+pathlib2
+segeval
+tensorboard_logger
+flask_wtf
+flask
+nltk
+pandas
+xlrd
+xlsxwriter
+termcolor
+scipy==1.12.0

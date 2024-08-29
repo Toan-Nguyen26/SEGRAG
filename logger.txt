@@ -1,0 +1,14 @@
+2024-08-29 21:40:59,972 - DEBUG - Running with config {'word2vecfile': './datasets/GoogleNews-vectors-negative300.bin', 'wiki-test-50k': './datasets/wiki_test_50', 'wikidataset': './datasets/wikidataset', 'half-wikidataset': './datasets/half-wikidataset', 'snippets': './datasets/snippets', 'cuda': True, 'test': False, 'bs': 8, 'model': 'checkpoints_new/best_model.t7', 'stop_after': None, 'config': 'config.json', 'wiki': True, 'bySegLength': False, 'wiki_folder': None, 'naive': False, 'seg_threshold': 0.4, 'calc_word': False, 'dataset': 'squad'}
+2024-08-29 21:40:59,974 - INFO - loading projection weights from ./datasets/GoogleNews-vectors-negative300.bin
+2024-08-29 21:41:44,468 - INFO - KeyedVectors lifecycle event {'msg': 'loaded (3000000, 300) matrix of type float32 from ./datasets/GoogleNews-vectors-negative300.bin', 'binary': True, 'encoding': 'utf8', 'datetime': '2024-08-29T21:41:44.329701', 'gensim': '4.3.2', 'python': '3.10.14 | packaged by Anaconda, Inc. | (main, May  6 2024, 19:44:50) [MSC v.1916 64 bit (AMD64)]', 'platform': 'Windows-10-10.0.22631-SP0', 'event': 'load_word2vec_format'}
+2024-08-29 21:41:56,450 - INFO - Sentence in wikipedia file is empty
+2024-08-29 21:41:56,452 - INFO - Sentence in wikipedia file is empty
+2024-08-29 21:42:14,909 - DEBUG - Num sentences: 2204, max sentence length: 104
+2024-08-29 21:42:16,789 - DEBUG - Batch 0 - error  0.0000, Accuracy:  0.9845
+2024-08-29 21:42:19,799 - DEBUG - Num sentences: 177, max sentence length: 80
+2024-08-29 21:42:19,992 - DEBUG - Batch 1 - error  0.0000, Accuracy:  0.9714
+2024-08-29 21:42:19,994 - INFO - Finished testing.
+2024-08-29 21:42:19,994 - INFO - Average loss: 0.0
+2024-08-29 21:42:19,994 - INFO - Average accuracy: 0.9835512442007591
+2024-08-29 21:42:19,996 - INFO - Pk: 0.8508.
+2024-08-29 21:42:19,996 - INFO - F1: 0.0.
