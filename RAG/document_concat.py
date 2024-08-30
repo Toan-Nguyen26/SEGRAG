@@ -16,11 +16,11 @@ def count_sentences(text):
     # Process the text with Spacy
     doc = nlp(text)
     
-    # Extract sentences
-    sentences = [sent.text.strip() for sent in doc.sents]
-    
-    return len(sentences)
+    return len(list(doc.sents))
 
+def sanitize_filename(filename):
+    # Replace invalid characters with underscores
+    return re.sub(r'[<>:"/\\|?*]', '_', filename)
 
 def preprocess_text(text):
     # Remove HTML tags
@@ -39,7 +39,7 @@ def clean_text(text):
         return text[len(unwanted_prefix):]
     return text
 
-def create_concatenated_documents_squad_json(output_json_path='data/squad/concatenated_documents.json', max_titles=10):
+def create_concatenated_documents_squad_json(output_dir='data/squad/individual_documents', max_titles=10):
     # Load the SQuAD dataset (SQuAD v1.1 in this case)
     dataset = load_dataset('squad', split='train')
 
@@ -70,14 +70,12 @@ def create_concatenated_documents_squad_json(output_json_path='data/squad/concat
                 document_id += 1  # Increment document ID
                 title_qas_count[title] = 0  # Initialize Q&A count for this title
 
-
             # Find the document entry with the matching title
             for doc in documents:
                 if doc['title'] == title:
                     # Add context if it's not already in the content list
                     if content not in doc['content']:
                         doc['content'].append(content)
-                        doc['num_sentences'] += count_sentences(content)
                     qas_entry = {
                         'question': (example['question']),
                         'context': content,
@@ -91,34 +89,38 @@ def create_concatenated_documents_squad_json(output_json_path='data/squad/concat
             if len(unique_titles) >= max_titles:
                 break
 
-    # Concatenate the contexts for each document
+    # Concatenate the contexts for each document, count sentences, and save each as a separate JSON file
+    os.makedirs(output_dir, exist_ok=True)
+    
     for doc in documents:
         doc['content'] = "\n".join(doc['content'])
         doc['content'] = preprocess_text(doc['content'])
+        doc['num_sentences'] = count_sentences(doc['content'])
+        
+        # Save each document as a separate JSON file with the ID as the filename
+        output_file_path = os.path.join(output_dir, f"{doc['id']}.json")
+        with open(output_file_path, 'w', encoding='utf-8') as json_file:
+            json.dump(doc, json_file, ensure_ascii=False, indent=4)
+        
+        print(f"Document ID {doc['id']} saved to {output_file_path}")
 
     # Print the number of Q&As per title and the total Q&A count
     for title, count in title_qas_count.items():
         print(f"Title: {title}, Q&A Count: {count}")
     print(f"Total Q&A Count: {total_qas_count}")
 
-    # Create the 'data' directory if it doesn't exist
-    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
 
-    # Write the documents to a JSON file
-    with open(output_json_path, 'w', encoding='utf-8') as json_file:
-        json.dump(documents, json_file, ensure_ascii=False, indent=4)
-
-    print(f"Concatenated contexts with IDs have been saved to {output_json_path}")
-
-def create_concatenated_documents_narrativeqa_json(output_json_path='data/narrativeqa/concatenated_documents.json', max_titles=10):
+def create_individual_documents_narrativeqa_json(output_dir='data/narrativeqa/individual_documents', max_titles=10):
     # Load the NarrativeQA dataset (train split)
     dataset = load_dataset('deepmind/narrativeqa', split='train')
     
     # Initialize variables
-    documents = []
     unique_titles = set()
     document_id = 1  # Start document IDs from 1
     total_qas_count = 0
+    
+    # Create the output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
     
     # Iterate through the dataset
     for item in dataset:
@@ -132,9 +134,9 @@ def create_concatenated_documents_narrativeqa_json(output_json_path='data/narrat
         if document_title not in unique_titles:
             content = clean_text(preprocess_text(item['document']['text']))
             
-            # Skip the document if the content length exceeds 1 million characters
-            if len(content) > 1_000_000:
-                print(f"Skipping document '{document_title}' due to content length > 1 million characters.")
+            # Skip the document if the content length exceeds 150,000 characters
+            if len(content) > 150_000:
+                print(f"Skipping document '{document_title}' due to content length > 150k characters.")
                 continue
 
             # Create a new document entry
@@ -151,36 +153,37 @@ def create_concatenated_documents_narrativeqa_json(output_json_path='data/narrat
             unique_titles.add(document_title)
             document_id += 1
 
-            # Add the document entry to the documents list
-            documents.append(document_entry)
-        
-        # Create a question-answer pair
-        qa_pair = {
-            "question": item['question']['text'],
-            "answers": [answer['text'] for answer in item['answers']]
-        }
-        
-        # Add the question-answer pair to the last document entry in the documents list
-        documents[-1]["qas"].append(qa_pair)
+            # Create a question-answer pair
+            qa_pair = {
+                "question": item['question']['text'],
+                "answers": [answer['text'] for answer in item['answers']]
+            }
 
-        # Increment the total_qas counter
-        total_qas_count += 1
+            # Add the question-answer pair to the document entry
+            document_entry["qas"].append(qa_pair)
 
-    # Create the 'data' directory if it doesn't exist
-    os.makedirs(os.path.dirname(output_json_path), exist_ok=True)
+            # Increment the total_qas counter
+            total_qas_count += 1
 
-    # Write the documents to a JSON file
-    with open(output_json_path, 'w', encoding='utf-8') as json_file:
-        json.dump(documents, json_file, ensure_ascii=False, indent=4)
+            # Create a valid filename using the ID and title
+            filename = sanitize_filename(f"{document_entry['id']}.json")
+            print(filename)
+            filepath = os.path.join(output_dir, filename)
+            
+            # Save the document entry to a JSON file
+            with open(filepath, 'w', encoding='utf-8') as json_file:
+                json.dump(document_entry, json_file, ensure_ascii=False, indent=4)
 
-    print(f"Saved {len(documents)} unique documents to {output_json_path}")
+            print(f"Saved document '{filename}' with {len(document_entry['qas'])} Q&A pairs.")
+
+    print(f"Total number of unique documents saved: {len(unique_titles)}")
     print(f"Total number of question-answer pairs (qas): {total_qas_count}")
 
 def main(args):
     if args.dataset == 'squad':
         create_concatenated_documents_squad_json()
     elif args.dataset == 'narrative_qa':
-        create_concatenated_documents_narrativeqa_json()
+        create_individual_documents_narrativeqa_json()
     else:
         raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'squad' or 'narrative_qa'.")
 

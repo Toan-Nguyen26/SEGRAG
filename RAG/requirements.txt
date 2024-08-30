@@ -11,3 +11,4 @@ openai
 langchain-cohere
 bs4
 spacy
+tf-keras
