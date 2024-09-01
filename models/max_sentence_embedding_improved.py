@@ -66,7 +66,7 @@ class Model(nn.Module):
 
         self.sentence_lstm = nn.LSTM(input_size=sentence_encoder.hidden * 2,
                                      hidden_size=hidden,
-                                     num_layers=num_layers*2,
+                                     num_layers=num_layers,
                                      batch_first=True,
                                      dropout=0.5,
                                      bidirectional=True)
@@ -179,5 +179,5 @@ class Model(nn.Module):
 def create():
     sentence_encoder = SentenceEncodingRNN(input_size=300,
                                            hidden=256,
-                                           num_layers=2)
-    return Model(sentence_encoder, hidden=256, num_layers=2)
+                                           num_layers=3)
+    return Model(sentence_encoder, hidden=256, num_layers=3)
