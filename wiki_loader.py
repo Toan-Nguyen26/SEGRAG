@@ -1,6 +1,7 @@
 from torch.utils.data import Dataset
 from text_manipulation import word_model
 from text_manipulation import extract_sentence_words
+from new_wiki_utils import read_concated_wiki_file, get_sections, process_json_file
 from pathlib2 import Path
 import logging
 import re
@@ -66,29 +67,6 @@ def get_scections_from_text(txt, high_granularity=True):
     return non_empty_sections
 
 
-def get_sections(path, high_granularity=True):
-    file = open(str(path), "r")
-    # with open(path, 'r', encoding='utf-8') as file:
-    #     raw_content = file.read()
-    # file.close()
-
-    with open(path, 'r', encoding='utf-8') as file:
-        raw_content = file.read()
-    file.close()
-    clean_txt = raw_content.strip()
-    # print("Raw content:", raw_content, "Clean text:", clean_txt)
-    sections = [clean_section(s) for s in get_scections_from_text(clean_txt, high_granularity)]
-    for section in sections:
-        print("Section: \n", section)
-        print("=====================================")
-    # Debugging Information
-    logger.info(f"File: {path}, Number of sections: {len(sections)}")
-    for i, section in enumerate(sections):
-        logger.info(f"Section {i+1} length: {len(section)}")
-
-    return sections
-
-
 def read_wiki_file(path, word2vec, remove_preface_segment=True, ignore_list=False, remove_special_tokens=False,
                    return_as_sentences=False, high_granularity=True,only_letters = False):
     data = []
@@ -96,19 +74,18 @@ def read_wiki_file(path, word2vec, remove_preface_segment=True, ignore_list=Fals
     all_sections = get_sections(path, high_granularity)
     required_sections = all_sections[1:] if remove_preface_segment and len(all_sections) > 0 else all_sections
     required_non_empty_sections = [section for section in required_sections if len(section) > 0 and section != "\n"]
-    print(f"{len(all_sections)} with non-required {len(required_non_empty_sections)} and required {len(required_sections)} for {path}")
-    # print("\n")
-    # print("Required sections:", required_non_empty_sections)
-    # print("\n")
-    # print("Required sections:", required_sections)
-    i = 0
+    # for section in required_non_empty_sections:
+    #     print(section)
+    #     print("\n")
+    # # print("Required sections:", required_non_empty_sections)
+    # # print("\n")
+    # print(path)
+    # print("=====================================")
+
     for section in required_non_empty_sections:
         sentences = section.split('\n')
         if sentences:
             for sentence in sentences:
-                # print("Sentence:", sentence,"on path:", path, "index:", i)
-                # print("=====================================")
-                i = i + 1
                 is_list_sentence = wiki_utils.get_list_token() + "." == sentence.encode('utf-8')
                 if ignore_list and is_list_sentence:
                     continue
@@ -127,60 +104,35 @@ def read_wiki_file(path, word2vec, remove_preface_segment=True, ignore_list=Fals
                         data.append(sentence)
             if data:
                 targets.append(len(data) - 1)
-    print(targets)
+    # print(targets)
     return data, targets, path
 
-def split_text_into_sentences(text):
-    # Load the Spacy model
-    nlp = spacy.load("en_core_web_sm")  # Ensure you have this model installed or use a different one
-    
-    # Process the text with Spacy
-    doc = nlp(text)
-    
-    # Extract sentences
-    sentences = [sent.text.strip() for sent in doc.sents]
-    
-    return sentences
-
-def process_json_file(document, word2vec, remove_special_tokens=False, return_as_sentences=False, only_letters=False):
-    data = []
-    targets = []
-    content = document['content']
-    doc_id = document['id']
-    sentences = split_text_into_sentences(content)
-    # i = 0
-    for sentence in sentences:
-        # print("Sentence:", sentence ,"index:", i)
-        # print("=====================================")
-        # i = i + 1
-        is_list_sentence = wiki_utils.get_list_token() + "." == sentence.encode('utf-8')
-        if is_list_sentence:
-            continue
-        if not return_as_sentences:
-            sentence_words = extract_sentence_words(sentence, remove_special_tokens=remove_special_tokens)
-            if 1 <= len(sentence_words):
-                data.append([word_model(word, word2vec) for word in sentence_words])
-            else:
-                #raise ValueError('Sentence in wikipedia file is empty')
-                logger.info('Sentence in wikipedia file is empty')
-        else:  # for the annotation. keep sentence as is.
-            if (only_letters):
-                sentence = re.sub('[^a-zA-Z0-9 ]+', '', sentence)
-                data.append(sentence)
-            else:
-                data.append(sentence)
-    if data:
-        targets.append(len(data) - 1)
-    return data, targets, doc_id
 
 class WikipediaDataSet(Dataset):
-    def __init__(self, root, word2vec, train=True, manifesto=False, folder=False, high_granularity=False, is_json=False, json_file=None):
+    def __init__(self, root, word2vec, train=True, manifesto=False, folder=False, high_granularity=False, is_json=False, json_data_path=None):
+        self.documents = []
+        self.train = train
+        self.root = root
+        self.word2vec = word2vec
+        self.high_granularity = high_granularity
+        self.is_json = is_json
+        self.json_data_path = json_data_path
 
-        if is_json and json_file:
-            with open(json_file, "r", encoding="utf-8") as file:
-                self.documents = json.load(file)
+        if is_json and json_data_path:
+            # Load all JSON files in the directory
+            json_directory = Path(json_data_path)
+            if json_directory.is_dir():
+                json_files = list(json_directory.glob('*.json'))
+                for json_path in json_files:
+                    print(json_path)
+                    with open(json_path, "r", encoding="utf-8") as file:
+                        documents_in_file = json.load(file)
+                        self.documents.append(documents_in_file)
+            else:
+                raise RuntimeError(f"JSON directory not found: {json_directory}")
+
             if len(self.documents) == 0:
-                raise RuntimeError('Found 0 documents in the JSON file: {}'.format("RAG\data\squad\concatenated_documents.json"))
+                raise RuntimeError(f'Found 0 documents in the JSON files within: {json_directory}')
         else:
             if (manifesto):
                 self.textfiles = list(Path(root).glob('*'))
@@ -195,15 +147,9 @@ class WikipediaDataSet(Dataset):
                     else:
                         print('Found cache file: {}'.format(cache_path))
                     self.textfiles = cache_path.read_text().splitlines()
-
+                    print("Number of files: ", len(self.textfiles))
             if len(self.textfiles) == 0:
                 raise RuntimeError('Found 0 images in subfolders of: {}'.format(root))
-        self.train = train
-        self.root = root
-        self.word2vec = word2vec
-        self.high_granularity = high_granularity
-        self.is_json = is_json
-        self.json_file = json_file
 
     def __getitem__(self, index):
         if self.is_json:
@@ -212,9 +158,9 @@ class WikipediaDataSet(Dataset):
             return process_json_file(document, self.word2vec, remove_special_tokens=True)
         else:
             path = self.textfiles[index]
-            print(Path(path))
-            return read_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
+            return read_concated_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
                                 high_granularity=self.high_granularity)
+        
 
         # return process_json_file(self.word2vec, remove_special_tokens=True)
     def __len__(self):
@@ -222,27 +168,3 @@ class WikipediaDataSet(Dataset):
             return len(self.documents)
         else:
             return len(self.textfiles)
-
-class InMemoryWikipediaDataSet(WikipediaDataSet):
-    def __init__(self, root, word2vec, train=True, manifesto=False, folder=False, high_granularity=False):
-        # Initialize the parent class to handle file paths and configurations
-        super().__init__(root, word2vec, train, manifesto, folder, high_granularity)
-        
-        self.data = []
-        self.targets = []
-        self.paths = []
-        
-        # Preload all data into memory
-        for path in self.textfiles:
-            data, target, path = read_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
-                                                high_granularity=self.high_granularity)
-            self.data.append(data)
-            self.targets.append(target)
-            self.paths.append(path)
-
-    def __getitem__(self, index):
-        # Return preloaded data and target from memory
-        return self.data[index], self.targets[index], self.paths[index]
-
-    def __len__(self):
-        return len(self.data)

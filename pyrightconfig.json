@@ -1,0 +1,22 @@
+{
+    "exclude": [
+        "checkpoints",
+        "datasets",
+        "save_model",
+        ".history",
+        "runs",
+        "config.json",
+        "segment_output.txt",
+        "my_datasets.zip",
+        "my_datasets",
+        "1_20_dataset.zip",
+        "1_20_dataset",
+        "1_10_dataset.zip",
+        "1_10_dataset",
+        "checkpoints_new",
+        "RAG/data/narrative_qa",
+        "RAG/data/squad",
+        "data",
+        "concatenated_documents"
+    ]
+}
