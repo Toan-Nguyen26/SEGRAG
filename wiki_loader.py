@@ -1,7 +1,7 @@
 from torch.utils.data import Dataset
 from text_manipulation import word_model
 from text_manipulation import extract_sentence_words
-from new_wiki_utils import read_concated_wiki_file, get_sections, process_json_file
+from new_wiki_utils import read_concated_wiki_file, get_sections, process_json_file, concat_document
 from pathlib2 import Path
 import logging
 import re
@@ -150,6 +150,42 @@ class WikipediaDataSet(Dataset):
                     print("Number of files: ", len(self.textfiles))
             if len(self.textfiles) == 0:
                 raise RuntimeError('Found 0 images in subfolders of: {}'.format(root))
+            
+            # concat_num_files = 5
+            # num_files = len(self.textfiles)
+            # num_batches = (num_files + concat_num_files - 1) // concat_num_files  # Calculate how many batches of 10 files
+
+            # for index in range(num_batches):
+            #     # Calculate the start and end index for the 10 documents to concatenate
+            #     start_idx = index * concat_num_files
+            #     end_idx = min(start_idx + concat_num_files, num_files)  # Ensure we don't go out of bounds
+
+            #     # Initialize an empty string to store the concatenated document
+            #     concatenated_document = ""
+
+            #     # Loop through the paths and concatenate the contents
+            #     for i in range(start_idx, end_idx):
+            #         path = self.textfiles[i]
+            #         concatenated_document += concat_document(Path(path)) + "===============\n"  # Add a separator between documents
+
+            #     # Determine the directory structure
+            #     # e.g., datasets/half-wikidataset/train/concat/00/00/concatenated_document_1.txt
+            #     batch_num = index // 1000
+            #     sub_dir_1 = f"{batch_num:02d}"
+            #     sub_dir_2 = f"{(index % 1000) // 100:02d}"
+                
+            #     output_directory = os.path.join(root, "concat", sub_dir_1, sub_dir_2)
+            #     os.makedirs(output_directory, exist_ok=True)  # Create directory if it doesn't exist
+
+            #     # Define the output file path
+            #     output_path = os.path.join(output_directory, f"concatenated_document_{index + 1}.txt")
+
+            #     # Write the concatenated document to a file
+            #     with open(output_path, 'w', encoding='utf-8') as output_file:
+            #         output_file.write(concatenated_document.strip())
+
+            #     print(f"Concatenated document {index + 1} written to: {output_path}")
+                
 
     def __getitem__(self, index):
         if self.is_json:
@@ -160,9 +196,7 @@ class WikipediaDataSet(Dataset):
             path = self.textfiles[index]
             return read_concated_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
                                 high_granularity=self.high_granularity)
-        
-
-        # return process_json_file(self.word2vec, remove_special_tokens=True)
+            # return
     def __len__(self):
         if self.is_json:
             return len(self.documents)

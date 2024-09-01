@@ -123,6 +123,7 @@ def get_sections(path, high_granularity=True):
     all_sections = []
     for doc in documents:
         clean_txt = doc.strip()
+        # print("Clean text:", clean_txt)
         sections = [clean_section(s) for s in get_scections_from_text(clean_txt, high_granularity)]
         all_sections.append(sections)
 
@@ -183,12 +184,12 @@ def read_concated_wiki_file(path, word2vec, remove_preface_segment=False, ignore
                         document_targets.append(len(data) - 1)
     # right now, target is an array of the index of the endsentence (so like [5,17])
     # But now, we should also return additional array for the end of the document
-    # print(f"Path: {path}")
-    # print(f"Segments are: {segment_targets}")
-    # print("\n")
-    # print(f"Documents are: {document_targets}")
-    # print("------------------")
-    return data, segment_targets, segment_targets, path
+    print(f"Path: {path}")
+    print(f"Segments are: {segment_targets}")
+    print("\n")
+    print(f"Documents are: {document_targets}")
+    print("------------------")
+    return data, segment_targets, document_targets, path
 
 def split_text_into_sentences(text):
     # Load the Spacy model

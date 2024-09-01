@@ -104,9 +104,7 @@ def train(model, args, epoch, dataset, logger, optimizer):
                         continue
                     loss.backward()
                     optimizer.step()
-                    # total_loss += loss.data[0]
                     total_loss += loss.item()
-                    # logger.debug('Batch %s - Train error %7.4f', i, loss.data[0])
                     pbar.set_description('Training, loss={:.4}'.format(loss.item()))
                 except RuntimeError as e:
                     if 'Length of all samples has to be greater than 0' in str(e):
@@ -196,6 +194,8 @@ def validate(model, args, epoch, dataset, logger):
 def test(model, args, epoch, dataset, logger, threshold):
     model.eval()
     with tqdm(desc='Testing', total=len(dataset)) as pbar:
+        # Add this line at the start of the main function to open a file for writing segment details
+        segment_output_file = open('segment_output.txt', 'w')
         acc_sentence = accuracy.Accuracy()
         acc_document = accuracy.Accuracy()
 
@@ -220,14 +220,10 @@ def test(model, args, epoch, dataset, logger, threshold):
                 target_seg = segment_targets_var.data.cpu().numpy()
                 target_doc = document_targets_var.data.cpu().numpy()
 
-                # Update accuracy and other metrics for sentence segmentation
+                # Update accuracy and other metrics for sentence and document segmentation
                 preds_stats.add(output_seg, target_seg)
-                acc_sentence.update(sentence_output_softmax.data.cpu().numpy(), segment_targets)
-
-                # Update accuracy and other metrics for document segmentation
-                acc_document.update(document_output_softmax.data.cpu().numpy(), document_targets)
                 preds_stats.add(output_doc, target_doc)
-
+                current_idx = 0
                 # # Additional processing for document-level segmentation
                 # current_idx = 0
                 # for k, doc_target in enumerate(document_targets):
@@ -249,10 +245,14 @@ def test(model, args, epoch, dataset, logger, threshold):
 
                     # Process segment-level predictions
                     seg_output = ((sentence_output_softmax.data.cpu().numpy()[current_idx: to_idx, :])[:, 1] > threshold)
-                    seg_h = np.append(seg_output, [1])
-                    seg_tt = np.append(seg_target, [1])
+                    seg_h = np.append(seg_output, [0])
+                    seg_tt = np.append(seg_target, [0])
 
                     acc_sentence.update(seg_h, seg_tt)
+
+                    segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k]}:\n')  # Include the file path
+                    segment_output_file.write(f'Segments: {seg_h}\n')
+                    segment_output_file.write(f'Target Segments: {seg_tt}\n\n')
 
                     current_idx = to_idx
 
@@ -260,8 +260,8 @@ def test(model, args, epoch, dataset, logger, threshold):
 
                 # Process document targets
                 for k, doc_target in enumerate(document_targets):
-                    document_sentence_count = len(doc_target)
-                    to_idx = int(current_idx + document_sentence_count)
+                    document_segment_count = len(doc_target)
+                    to_idx = int(current_idx + document_segment_count)
 
                     # Process document-level predictions
                     doc_output = ((document_output_softmax.data.cpu().numpy()[current_idx: to_idx, :])[:, 1] > threshold)
@@ -269,6 +269,9 @@ def test(model, args, epoch, dataset, logger, threshold):
                     doc_tt = np.append(doc_target, [1])
 
                     acc_document.update(doc_h, doc_tt)
+                    segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k]}:\n') 
+                    segment_output_file.write(f'Large Segment: {doc_h}\n')
+                    segment_output_file.write(f'Target Large Segments: {doc_tt}\n\n')
 
                     current_idx = to_idx
 
@@ -325,8 +328,11 @@ def main(args):
 
     if not args.infer:
         if args.wiki:
+            # dataset_path = Path(utils.config['half-wikidataset'])
             # dataset_path = Path(utils.config['wikidataset'])
-            dataset_path = Path(utils.config['10_concanted_documents_small'])
+            # dataset_path = Path(utils.config['10_concanted_documents_small'])
+            # dataset_path = Path(utils.config['1_concanted_document_mini'])
+            dataset_path = Path(utils.config['5_concanted_document_mini'])
             train_dataset = WikipediaDataSet(dataset_path / 'train', word2vec=word2vec,
                                              high_granularity=args.high_granularity)
             dev_dataset = WikipediaDataSet(dataset_path / 'dev', word2vec=word2vec, high_granularity=args.high_granularity)

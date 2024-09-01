@@ -15,6 +15,8 @@ jsondata = {
       "snippets": "./datasets/snippets",
       "10_concanted_documents": "./datasets/10_concanted_document",
       "10_concanted_documents_small": "./datasets/10_concanted_document_small",
+      "5_concanted_document_mini": "./datasets/5_concanted_document_mini",
+      "1_concanted_document_mini": "./datasets/1_concanted_document_mini",
 
        # Ruunning on colab
     #   "word2vecfile": "./my_datasets/GoogleNews-vectors-negative300.bin",
