@@ -245,8 +245,8 @@ def test(model, args, epoch, dataset, logger, threshold):
 
                     # Process segment-level predictions
                     seg_output = ((sentence_output_softmax.data.cpu().numpy()[current_idx: to_idx, :])[:, 1] > threshold)
-                    seg_h = np.append(seg_output, [0])
-                    seg_tt = np.append(seg_target, [0])
+                    seg_h = np.append(seg_output, [1])
+                    seg_tt = np.append(seg_target, [1])
 
                     acc_sentence.update(seg_h, seg_tt)
 

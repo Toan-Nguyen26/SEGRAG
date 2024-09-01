@@ -175,20 +175,18 @@ def read_concated_wiki_file(path, word2vec, remove_preface_segment=False, ignore
                         else:
                             data.append(sentence)
 
-                # Print the last sentence in the sentences list
-                if i < len(required_non_empty_sections) - 1:
-                    if data:
-                        segment_targets.append(len(data) - 1)
-                else:
-                    if data:
-                        document_targets.append(len(data) - 1)
+                if data:  # Ensure data is not empty
+                    last_index = len(data) - 1
+                    segment_targets.append(last_index)
+                    if i == len(required_non_empty_sections) - 1:
+                        document_targets.append(last_index)
     # right now, target is an array of the index of the endsentence (so like [5,17])
     # But now, we should also return additional array for the end of the document
-    # print(f"Path: {path}")
-    # print(f"Segments are: {segment_targets}")
-    # print("\n")
-    # print(f"Documents are: {document_targets}")
-    # print("------------------")
+    print(f"Path: {path}")
+    print(f"Segments are: {segment_targets}")
+    print("\n")
+    print(f"Documents are: {document_targets}")
+    print("------------------")
     return data, segment_targets, document_targets, path
 
 def split_text_into_sentences(text):
