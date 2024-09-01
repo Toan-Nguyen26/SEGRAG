@@ -13,6 +13,8 @@ jsondata = {
       "wikidataset": "./datasets/wikidataset",
       "half-wikidataset": "./datasets/half-wikidataset",
       "snippets": "./datasets/snippets",
+      "10_concanted_documents": "./datasets/10_concanted_document",
+      "10_concanted_documents_small": "./datasets/10_concanted_document_small",
 
        # Ruunning on colab
     #   "word2vecfile": "./my_datasets/GoogleNews-vectors-negative300.bin",
