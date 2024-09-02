@@ -10,6 +10,7 @@ import os
 import json
 import utils
 import spacy
+import random
 
 logger = utils.setup_logger(__name__, 'train.log')
 
@@ -151,14 +152,19 @@ class WikipediaDataSet(Dataset):
             if len(self.textfiles) == 0:
                 raise RuntimeError('Found 0 images in subfolders of: {}'.format(root))
             
-            # concat_num_files = 5
+            # concat_num_files_min = 4
+            # concat_num_files_max = 7
             # num_files = len(self.textfiles)
-            # num_batches = (num_files + concat_num_files - 1) // concat_num_files  # Calculate how many batches of 10 files
+            # current_index = 0
+            # document_index = 1
 
-            # for index in range(num_batches):
-            #     # Calculate the start and end index for the 10 documents to concatenate
-            #     start_idx = index * concat_num_files
-            #     end_idx = min(start_idx + concat_num_files, num_files)  # Ensure we don't go out of bounds
+            # while current_index < num_files:
+            #     # Randomly select the number of files to concatenate between 4 and 7
+            #     concat_num_files = random.randint(concat_num_files_min, concat_num_files_max)
+                
+            #     # Calculate the start and end index for the documents to concatenate
+            #     start_idx = current_index
+            #     end_idx = min(current_index + concat_num_files, num_files)  # Ensure we don't go out of bounds
 
             #     # Initialize an empty string to store the concatenated document
             #     concatenated_document = ""
@@ -169,23 +175,26 @@ class WikipediaDataSet(Dataset):
             #         concatenated_document += concat_document(Path(path)) + "===============\n"  # Add a separator between documents
 
             #     # Determine the directory structure
-            #     # e.g., datasets/half-wikidataset/train/concat/00/00/concatenated_document_1.txt
-            #     batch_num = index // 1000
+            #     batch_num = document_index // 1000
             #     sub_dir_1 = f"{batch_num:02d}"
-            #     sub_dir_2 = f"{(index % 1000) // 100:02d}"
-                
+            #     sub_dir_2 = f"{(document_index % 1000) // 100:02d}"
+
             #     output_directory = os.path.join(root, "concat", sub_dir_1, sub_dir_2)
             #     os.makedirs(output_directory, exist_ok=True)  # Create directory if it doesn't exist
 
             #     # Define the output file path
-            #     output_path = os.path.join(output_directory, f"concatenated_document_{index + 1}.txt")
+            #     output_path = os.path.join(output_directory, f"concatenated_document_{document_index}.txt")
 
             #     # Write the concatenated document to a file
             #     with open(output_path, 'w', encoding='utf-8') as output_file:
             #         output_file.write(concatenated_document.strip())
 
-            #     print(f"Concatenated document {index + 1} written to: {output_path}")
-                
+            #     print(f"Concatenated document {document_index} written to: {output_path}")
+
+            #     # Update the current index and document index
+            #     current_index = end_idx
+            #     document_index += 1
+                            
 
     def __getitem__(self, index):
         if self.is_json:

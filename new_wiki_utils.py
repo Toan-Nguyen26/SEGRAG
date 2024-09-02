@@ -165,9 +165,9 @@ def read_concated_wiki_file(path, word2vec, remove_preface_segment=False, ignore
                         sentence_words = extract_sentence_words(sentence, remove_special_tokens=remove_special_tokens)
                         if 1 <= len(sentence_words):
                             data.append([word_model(word, word2vec) for word in sentence_words])
-                        else:
-                            #raise ValueError('Sentence in wikipedia file is empty')
-                            logger.info('Sentence in wikipedia file is empty')
+                        # else:
+                        #     #raise ValueError('Sentence in wikipedia file is empty')
+                        #     logger.info('Sentence in wikipedia file is empty')
                     else:  # for the annotation. keep sentence as is.
                         if only_letters:
                             sentence = re.sub('[^a-zA-Z0-9 ]+', '', sentence)

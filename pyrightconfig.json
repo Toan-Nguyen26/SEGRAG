@@ -17,6 +17,7 @@
         "RAG/data/narrative_qa",
         "RAG/data/squad",
         "data",
-        "concatenated_documents"
+        "concatenated_documents",
+        "burr"
     ]
 }
