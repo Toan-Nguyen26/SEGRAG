@@ -332,7 +332,7 @@ def main(args):
             # dataset_path = Path(utils.config['wikidataset'])
             # dataset_path = Path(utils.config['10_concanted_documents_small'])
             # dataset_path = Path(utils.config['1_concanted_document_mini'])
-            dataset_path = Path(utils.config['5_concanted_document_mini'])
+            dataset_path = Path(utils.config[args.path])
             train_dataset = WikipediaDataSet(dataset_path / 'train', word2vec=word2vec,
                                              high_granularity=args.high_granularity)
             dev_dataset = WikipediaDataSet(dataset_path / 'dev', word2vec=word2vec, high_granularity=args.high_granularity)
@@ -428,6 +428,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', help='How many workers to use for data loading', type=int, default=0)
     parser.add_argument('--high_granularity', help='Use high granularity for wikipedia dataset segmentation', action='store_true')
     parser.add_argument('--infer', help='inference_dir', type=str)
+    parser.add_argument('--path', help='Path for the datasets', type=str, default='./datasets')
     parser.add_argument('--early_stops', help='Help to stop training early after a certain amounts of epochs does not improt p_k', type=int)
 
     main(parser.parse_args())
