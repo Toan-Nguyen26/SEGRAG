@@ -18,6 +18,7 @@
         "RAG/data/squad",
         "data",
         "concatenated_documents",
-        "burr"
+        "burr",
+        "wikidataset"
     ]
 }

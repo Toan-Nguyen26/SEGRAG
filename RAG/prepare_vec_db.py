@@ -27,10 +27,6 @@ def split_text_into_segmented_chunks_at_sentences_level(num_sentences, text, max
     l = len(segmented_sentences)  # Total number of sentences
 
     if segmented_sentences is None or num_sentences != len(list(doc.sents)):
-    # print(f"num_sentences = {num_sentences}")
-    # print(f"len(list(doc.sents)) = {len(list(doc.sents))}")
-    # print(f"length of segmeented sentencs = {l}")
-    # print("________________________________")
         raise ValueError("segmented_sentences must have the same length as the number of sentences in the text.")
 
     for sentence in doc.sents:
@@ -143,7 +139,6 @@ def create_faiss_index_from_json(json_file_path='data/concatenated_documents_new
     tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/multi-qa-mpnet-base-dot-v1")
 
     for doc in documents:
-        print("Hello")
         content = doc['content']
         doc_id = doc['id']
 
@@ -243,14 +238,90 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
 
     print(f"FAISS index and document chunk information have been saved to {output_faiss_path} and {output_ids_path}")
 
+def embedding_testing():
+    # Load the model and tokenizer
+    model = SentenceTransformer("sentence-transformers/multi-qa-mpnet-base-dot-v1")
+    tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/multi-qa-mpnet-base-dot-v1")
+    output_faiss_path = '/faiss_index_256.index'
+    output_ids_path = "document_chunks.json"
+    documents = [
+        {
+            "id": "doc1",
+             "content": [
+                # Group 1: Artificial Intelligence and Machine Learning
+                "Artificial intelligence is revolutionizing various industries.",
+                "Machine learning is a subset of artificial intelligence focused on training algorithms.",
+                "Deep learning is a technique within machine learning that uses neural networks with many layers.",
+                
+                # Group 2: Natural Language Processing and AI Applications
+                "Natural language processing allows machines to understand and generate human language.",
+                "Computer vision enables machines to interpret and analyze visual information.",
+                "AI ethics is an important consideration for ensuring responsible technology development.",
+                
+                # Group 3: Robotics and Autonomous Systems
+                "Robotics is an interdisciplinary field integrating AI with hardware to create intelligent machines.",
+                "Autonomous vehicles use machine learning to navigate without human intervention.",
+                "Reinforcement learning trains agents to make decisions through trial and error.",
+                
+                # # Group 4: Generative Models and AI Techniques
+                # "Generative models like GANs can create realistic images from noise.",
+                # "Neural networks are at the core of many AI advancements.",
+                # "Data science involves using various techniques to extract insights from data."
+            ]
+        }
+    ]
+
+
+    # Prepare lists to store embeddings and document info
+    embeddings = []
+    document_chunks = []
+
+    for doc in documents:
+        content = doc['content']
+        doc_id = doc['id']
+        # print(content)
+        # sentences = content.split('. ')
+        for sentence in content:
+            # Encode the sentence
+            embedding = model.encode(sentence)
+            chunk_uuid = str(uuid.uuid4())  # Generate a unique UUID for each sentence
+
+            # Store the embedding and related information
+            embeddings.append(embedding)
+            document_chunks.append({
+                'id': chunk_uuid,
+                'doc_id': doc_id,
+                'chunk': sentence,
+                'embedding': embedding.tolist()  # Convert to list for JSON serialization
+            })
+
+    # Convert embeddings to a numpy array
+    embeddings = np.array(embeddings)
+
+    # Create a FAISS index
+    embedding_dim = embeddings.shape[1]  # Dimension of the embeddings
+    index = faiss.IndexFlatL2(embedding_dim)  # L2 distance for similarity search
+    index.add(embeddings)  # Add the embeddings to the index
+
+   # Save the FAISS index
+    os.makedirs(os.path.dirname(output_faiss_path), exist_ok=True)
+    faiss.write_index(index, output_faiss_path)
+
+    # Save the document chunks with IDs and embeddings
+    with open(output_ids_path, 'w', encoding='utf-8') as id_file:
+        json.dump(document_chunks, id_file, ensure_ascii=False, indent=4)
+
+    print(f"FAISS index and document chunk information have been saved to {output_faiss_path} and {output_ids_path}")
+
 def main(args):
     if args.dataset:
         # json_directory_path = f'data/{args.dataset}/individual_documents'
         json_directory_path = f'data/{args.dataset}/test_documents'
-        create_segmendtaion_faiss_index_from_directory(json_directory_path=json_directory_path, 
-                                     output_faiss_path=f'data/{args.dataset}/faiss_index/{args.chunk_type}_{args.chunk_size}.index', 
-                                     output_ids_path=f'data/{args.dataset}/embeddings/{args.chunk_type}_{args.chunk_size}.json',
-                                     chunk_size=args.chunk_size)
+        embedding_testing()
+        # create_segmendtaion_faiss_index_from_directory(json_directory_path=json_directory_path, 
+        #                              output_faiss_path=f'data/{args.dataset}/faiss_index/{args.chunk_type}_{args.chunk_size}.index', 
+        #                              output_ids_path=f'data/{args.dataset}/embeddings/{args.chunk_type}_{args.chunk_size}.json',
+        #                              chunk_size=args.chunk_size)
     else:
         raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'squad' or 'narrative_qa'.")
 

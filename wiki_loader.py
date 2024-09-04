@@ -1,7 +1,7 @@
 from torch.utils.data import Dataset
 from text_manipulation import word_model
 from text_manipulation import extract_sentence_words
-from new_wiki_utils import read_concated_wiki_file, get_sections, process_json_file, concat_document
+from new_wiki_utils import read_concated_wiki_file, get_sections, process_json_file, concat_document, get_old_sections
 from pathlib2 import Path
 import logging
 import re
@@ -72,7 +72,7 @@ def read_wiki_file(path, word2vec, remove_preface_segment=True, ignore_list=Fals
                    return_as_sentences=False, high_granularity=True,only_letters = False):
     data = []
     targets = []
-    all_sections = get_sections(path, high_granularity)
+    all_sections = get_old_sections(path, high_granularity)
     required_sections = all_sections[1:] if remove_preface_segment and len(all_sections) > 0 else all_sections
     required_non_empty_sections = [section for section in required_sections if len(section) > 0 and section != "\n"]
     # for section in required_non_empty_sections:
@@ -203,9 +203,10 @@ class WikipediaDataSet(Dataset):
             return process_json_file(document, self.word2vec, remove_special_tokens=True)
         else:
             path = self.textfiles[index]
-            return read_concated_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
+            # return read_concated_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
+            #                     high_granularity=self.high_granularity)
+            return read_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
                                 high_granularity=self.high_granularity)
-            # return
     def __len__(self):
         if self.is_json:
             return len(self.documents)

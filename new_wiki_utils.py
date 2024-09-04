@@ -133,6 +133,16 @@ def get_sections(path, high_granularity=True):
 
     return all_sections
 
+def get_old_sections(path, high_granularity=True):
+    file = open(str(path), "r")
+    with open(path, 'r', encoding='utf-8') as file:
+        raw_content = file.read()
+    file.close()
+    clean_txt = raw_content.strip()
+    sections = [clean_section(s) for s in get_scections_from_text(clean_txt, high_granularity)]
+
+    return sections
+
 def split_documents(content):
     """
     Split the content into multiple documents based on the document separator.

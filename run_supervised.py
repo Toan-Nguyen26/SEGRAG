@@ -102,7 +102,8 @@ def train(model, args, epoch, dataset, logger, optimizer):
                     if torch.isnan(loss):
                         logger.error(f"Loss is NaN at batch {i}, skipping the batch. Paths: {paths}")
                         continue
-                    loss.backward()
+                    loss_sentence.backward()
+                    loss_document.backward()
                     optimizer.step()
                     total_loss += loss.item()
                     pbar.set_description('Training, loss={:.4}'.format(loss.item()))
