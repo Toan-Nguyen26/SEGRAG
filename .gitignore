@@ -119,3 +119,5 @@ RAG/data/narrative_qa
 RAG/data/squad
 data
 concatenated_documents
+wikidataset
+burr

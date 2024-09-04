@@ -7,13 +7,13 @@ import spacy
 from datasets import load_dataset
 from bs4 import BeautifulSoup
 from argparse import ArgumentParser
-from urllib.parse import unquote  # Import unquote for decoding URL-encoded titles
+from urllib.parse import unquote 
+from document_model import DocumentEntry, QAEntry
 # Load the spaCy model
 
 def count_sentences(text):
     # Load the Spacy model
-    nlp = spacy.load("en_core_web_sm")  # Ensure you have this model installed or use a different one
-    # Process the text with Spacy
+    nlp = spacy.load("en_core_web_sm")  
     doc = nlp(text)
     
     return len(list(doc.sents))
@@ -58,14 +58,15 @@ def create_concatenated_documents_squad_json(output_dir='data/squad/individual_d
             content = example['context']
             if title not in unique_titles:
                 unique_titles.add(title)
-                document_entry = {
-                    'id': document_id,
-                    'title': title,
-                    'qas': [],
-                    'content': [],
-                    "num_sentences": 0,
-                    "segmented_sentences": []
-                }
+                document_entry = DocumentEntry(id=document_id, title=title)
+                # document_entry = {
+                #     'id': document_id,
+                #     'title': title,
+                #     'qas': [],
+                #     'content': [],
+                #     "num_sentences": 0,
+                #     "segmented_sentences": []
+                # }
                 documents.append(document_entry)
                 document_id += 1  # Increment document ID
                 title_qas_count[title] = 0  # Initialize Q&A count for this title
@@ -75,13 +76,19 @@ def create_concatenated_documents_squad_json(output_dir='data/squad/individual_d
                 if doc['title'] == title:
                     # Add context if it's not already in the content list
                     if content not in doc['content']:
-                        doc['content'].append(content)
-                    qas_entry = {
-                        'question': (example['question']),
-                        'context': content,
-                        'answers': example['answers']['text']
-                    }
-                    doc['qas'].append(qas_entry)
+                        doc.content.append(content)
+                    qas_entry = QAEntry(
+                        question=example['question'],
+                        context=content,
+                        answers=example['answers']['text']
+                    )
+                    # qas_entry = {
+                    #     'question': (example['question']),
+                    #     'context': content,
+                    #     'answers': example['answers']['text']
+                    # }
+                    # doc['qas'].append(qas_entry)
+                    doc.qas.append(qas_entry)
                     title_qas_count[title] += 1  # Increment Q&A count for this title
                     total_qas_count += 1  # Increment total Q&A count
             
@@ -156,6 +163,7 @@ def create_individual_documents_narrativeqa_json(output_dir='data/narrativeqa/in
             # Create a question-answer pair
             qa_pair = {
                 "question": item['question']['text'],
+                "context": "",
                 "answers": [answer['text'] for answer in item['answers']]
             }
 
