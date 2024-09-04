@@ -32,11 +32,14 @@ def bron_kerbosch_with_pivot(R, P, X, cliques, graph):
     
     if len(P) == 0 and len(X) == 0:
         # A maximal clique is found
+        # R = sorted(R)
         cliques.append(R)
         logging.info(f"Maximal clique found: {R}")
     else:
+        # Choose a pivot vertex from P union X to reduce the number of recursive calls
         pivot = max(P.union(X), key=lambda u: len(graph.get(u, set())), default=None)
         logging.info(f"Chosen pivot: {pivot}")
+        # Explore only the vertices in P that are not neighbors of the pivot
         for v in list(P - graph.get(pivot, set())):
             logging.info(f"\nExploring vertex: {v}")
             logging.info(f"Neighbors of {v}: {graph[v]}")
@@ -51,59 +54,78 @@ def find_maximal_cliques_with_pivot(graph):
     # Explicitly specify the nodes if needed
     bron_kerbosch_with_pivot(set(), set(graph.keys()), set(), cliques, graph)
     logging.info(f"All maximal cliques: {cliques}")
+    print(f"All maximal cliques: {cliques}")
     return cliques
 
 
-def create_initial_segments(cliques):
+def create_initial_segments(cliques, all_segments):
     """
     Step 1: Create initial segments by merging adjacent sentences found in at least one maximal clique.
     """
     SG = []  # Initial set of segments
     segment_map = {}
-
+    used_segments = set()
     for clique in cliques:
-        clique = sorted(clique)  # Ensure the cliques are sorted
-        for i in range(len(clique) - 1):
-            Si, Sj = clique[i], clique[i + 1]
-            if Si not in segment_map and Sj not in segment_map:
-                # Both are new, create a new segment
-                new_segment = {Si, Sj}
-                SG.append(new_segment)
-                segment_map[Si] = new_segment
-                segment_map[Sj] = new_segment
-            elif Si in segment_map and Sj not in segment_map:
-                # Si is part of a segment, add Sj to it
-                segment_map[Si].add(Sj)
-                segment_map[Sj] = segment_map[Si]
-            elif Si not in segment_map and Sj in segment_map:
-                # Sj is part of a segment, add Si to it
-                segment_map[Sj].add(Si)
-                segment_map[Si] = segment_map[Sj]
-            # Else: both Si and Sj are already part of segments, no action needed
+        clique = sorted(clique)
+        for i in range(len(clique) -1):
+            if clique[i+1] - clique[i] == 1:
+                Si, Sj = clique[i], clique[i + 1]
+                if Si not in segment_map and Sj not in segment_map:
+                    new_segment = {Si, Sj}
+                    SG.append(new_segment)
+                    segment_map[Si] = new_segment
+                    segment_map[Sj] = new_segment
+                    used_segments.update({clique[i], clique[i+1]})
+                elif Si in segment_map and Sj not in segment_map:
+                    segment_map[Si].add(Sj)
+                    segment_map[Sj] = segment_map[Si]
+                    used_segments.add(Sj)
+                elif Si not in segment_map and Sj in segment_map:
+                    segment_map[Sj].add(Si)
+                    segment_map[Si] = segment_map[Sj]
+                    used_segments.add(Si)
+    
+    for segment in all_segments:
+        if segment not in used_segments:
+            SG.append({segment})
     print(f"Initial segments: {SG}")
     return SG
 
+def sort_segments(SG):
+    # Sort each segment individually and convert back to sets
+    sorted_segments = [set(sorted(segment)) for segment in SG]
+    
+    # Sort the list of segments by the first element of each segment (converted to a list for sorting)
+    sorted_segments = sorted(sorted_segments, key=lambda x: sorted(x)[0])
+    
+    return sorted_segments
 
-def merge_segments(SG):
-    """
-    Step 2: Merges adjacent segments based on overlap or adjacency.
-    """
+#This needs a lot of work
+def merge_segments(SG, cliques):
+    new_SG = []
     i = 0
-    while i < len(SG) - 1:
-        sgi = SG[i]
-        sgi1 = SG[i + 1]
 
-        # Check if there is any overlap between the current segment and the next
-        if len(sgi.intersection(sgi1)) > 0:
-            # Merge the two segments
-            merged_segment = sgi.union(sgi1)
-            SG[i] = merged_segment
-            SG.pop(i + 1)  # Remove the next segment that was merged
-        else:
-            # Move to the next pair of segments
+    while i < len(SG):
+        sgi = SG[i]
+        merged = False
+        if i < len(SG) - 1:
+            sgi1 = SG[i + 1]
+            for clique in cliques:
+                if sgi.intersection(clique) and sgi1.intersection(clique):
+                    # Merge the two segments
+                    merged_segment = sgi.union(sgi1)
+                    new_SG.append(merged_segment)  # Add the merged segment
+                    merged = True
+                    i += 2  # Skip the next segment as it has been merged
+                    break
+        
+        if not merged:
+            new_SG.append(sgi) 
             i += 1
-    print(f"Final segments: {SG}")
-    return SG
+
+    print(f"Final segments: {new_SG}")
+    return new_SG
+
 # Shit ain't working
 def create_relatedness_graph(embeddings, threshold=0.0):
     graph = {i: set() for i in range(len(embeddings))}
@@ -131,33 +153,25 @@ def create_relatedness_graph(embeddings, threshold=0.0):
     print(f"The graph is {graph}")
     return graph
 
-
 def hard_code_graph(embeddings):
-    graph = {
-        1: {2, 6, 8, 9},
-        2: {1, 6, 4, 7},
-        3: {4, 5},
-        4: {2, 3, 5, 7},
-        5: {3, 4},
-        6: {1, 2},
-        7: {2, 4},
-        8: {1, 9},
-        9: {1, 8}
-    }
     # graph = {
     #     1: {2, 6, 8, 9},
-    #     2: {4, 6, 7},
+    #     2: {1, 6, 4, 7},
     #     3: {4, 5},
-    #     4: {5, 7},
-    #     8: {9}
+    #     4: {2, 3, 5, 7},
+    #     5: {3, 4},
+    #     6: {1, 2},
+    #     7: {2, 4},
+    #     8: {1, 9},
+    #     9: {1, 8}
     # }
-    # graph = {
-    #     1: {2, 3},
-    #     2: {1, 3},
-    #     3: {1,2,4},
-    #     4: {3},
-    #     5: {}
-    # }
+    graph = {
+        1: {2, 3},
+        2: {1, 3},
+        3: {1,2,4},
+        4: {3},
+        5: {}
+    }
     
     
     # Ensure all nodes are included in the graph
@@ -166,7 +180,7 @@ def hard_code_graph(embeddings):
     #         graph[i] = set()
     
     print(f"The graph is {graph}")
-    return graph
+    return graph, set(graph.keys())
 
 
 # Main function to process JSON input and run Bron-Kerbosch
@@ -175,14 +189,13 @@ def process_json_and_bron_kerbosch(json_file_path, threshold=0.75):
     with open(json_file_path, 'r', encoding='utf-8') as json_file:
         documents = json.load(json_file)
     embeddings = [np.array(doc['embedding']) for doc in documents]
-    # son = hard_code_graph(embeddings)
-    relatedness_graph = create_relatedness_graph(embeddings, threshold)
-    # maximal_cliques = find_maximal_cliques_with_pivot(son)
-    # initial_segments = create_initial_segments(maximal_cliques)
-    # merged_segments = merge_segments(initial_segments)
-
-    return
-    # return merged_segments
+    son, all_segments = hard_code_graph(embeddings)
+    # relatedness_graph = create_relatedness_graph(embeddings, threshold)
+    maximal_cliques = find_maximal_cliques_with_pivot(son)
+    initial_segments = create_initial_segments(maximal_cliques, all_segments)
+    sorted_initial_segments = sort_segments(initial_segments)
+    merged_segments = merge_segments(sorted_initial_segments, maximal_cliques)
+    return merged_segments
 
 # Example usage
 if __name__ == "__main__":
