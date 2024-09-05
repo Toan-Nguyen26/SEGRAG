@@ -39,6 +39,11 @@ class SentenceEncodingRNN(nn.Module):
         s = zero_state(self, batch_size)
         packed_output, _ = self.lstm(x, s)
         padded_output, lengths = pad_packed_sequence(packed_output) # (max sentence len, batch, 256) 
+        # maxes = Variable(maybe_cuda(torch.zeros(batch_size, padded_output.size(2))))
+        # for i in range(batch_size):
+        #     maxes[i, :] = torch.max(padded_output[:lengths[i], i, :], 0)[0]
+        # print("old_maxes: ", maxes.size())
+        # print("old_maxes: ", maxes)
 
         # Determine the device of the padded_output
         device = padded_output.device
@@ -55,6 +60,8 @@ class SentenceEncodingRNN(nn.Module):
 
         # Now compute the max, excluding padding
         maxes, _ = torch.max(masked_padded_output, dim=0)
+        # print("maxes: ", maxes.size())
+        # print("maxes: ", maxes)
         return maxes
 
 
@@ -68,32 +75,19 @@ class Model(nn.Module):
                                      hidden_size=hidden,
                                      num_layers=num_layers,
                                      batch_first=True,
-                                     dropout=0.5,
+                                     dropout=0,
                                      bidirectional=True)
 
-        # Adding separate processing layers for each task
-        self.sentence_processing = nn.Sequential(
-            nn.Linear(hidden * 2, hidden),
-            nn.ReLU(),
-            nn.Dropout(0.5)
-        )
+        # We have two labels
+        self.h2s = nn.Linear(hidden * 2, 2)
 
-        self.document_processing = nn.Sequential(
-            nn.Linear(hidden * 2, hidden),
-            nn.ReLU(),
-            nn.Dropout(0.5)
-        )
-
-        # Separate heads for sentence and document-level segmentation
-        self.sentence_head = nn.Linear(hidden, 2)
-        self.document_head = nn.Linear(hidden, 2)
+        # Now we have 3 labels
+        self.h3s = nn.Linear(hidden * 2, 3)
 
         self.num_layers = num_layers
         self.hidden = hidden
 
-        # Loss functions
-        self.criterion_sentence = nn.CrossEntropyLoss()
-        self.criterion_document = nn.CrossEntropyLoss()
+        self.criterion = nn.CrossEntropyLoss()
 
 
     def pad(self, s, max_length):
@@ -102,6 +96,14 @@ class Model(nn.Module):
         padded = F.pad(v, (0, 0, 0, max_length - s_length))  # (1, 1, max_length, 300)
         shape = padded.size()
         return padded.view(shape[2], 1, shape[3])  # (max_length, 1, 300)
+
+
+    # def pad_document(self, d, max_document_length):
+    #     d_length = d.size()[0]
+    #     v = d.unsqueeze(0).unsqueeze(0)
+    #     padded = F.pad(v, (0, 0,0, max_document_length - d_length ))  # (1, 1, max_length, 300)
+    #     shape = padded.size()
+    #     return padded.view(shape[2], 1, shape[3])  # (max_length, 1, 300)
 
     def pad_document(self, d, max_document_length):
         if d.size(0) == 0:  # Check if the document is empty
@@ -128,6 +130,18 @@ class Model(nn.Module):
         sorted_sentences = [all_batch_sentences[i] for i in sort_order]
         sorted_lengths = [s.size()[0] for s in sorted_sentences]
 
+        # Filter out zero-length sentences
+        # non_zero_lengths = np.array(sorted_lengths) > 0
+        # if not non_zero_lengths.all():
+        #     print(f"Found zero-length sentences in batch: {batch}")
+        #     logger.warning("Found zero-length sentences, filtering them out.")
+        #     sorted_sentences = [sorted_sentences[i] for i in range(len(sorted_sentences)) if non_zero_lengths[i]]
+        #     sorted_lengths = [sorted_lengths[i] for i in range(len(sorted_lengths)) if non_zero_lengths[i]]
+
+        # if len(sorted_lengths) == 0:
+        #     raise RuntimeError("All sequences in this batch are of length zero.")
+
+        # max_length = max(sorted_lengths)
         max_length = max(lengths)
         logger.debug('Num sentences: %s, max sentence length: %s', 
                      sum(sentences_per_doc), max_length)
@@ -148,6 +162,17 @@ class Model(nn.Module):
         
         doc_sizes = [doc.size()[0] for doc in encoded_documents]
 
+        # Filter out zero-length documents
+        # non_zero_doc_sizes = np.array(doc_sizes) > 0
+        # if not non_zero_doc_sizes.all():
+        #     print(f"Found zero-length documents in batch: {batch}")
+        #     logger.warning("Found zero-length documents, filtering them out.")
+        #     encoded_documents = [encoded_documents[i] for i in range(len(encoded_documents)) if non_zero_doc_sizes[i]]
+        #     doc_sizes = [doc_sizes[i] for i in range(len(doc_sizes)) if non_zero_doc_sizes[i]]
+
+        # if len(doc_sizes) == 0:
+        #     raise RuntimeError("All documents in this batch are of length zero.")
+
         max_doc_size = np.max(doc_sizes)
         ordered_document_idx = np.argsort(doc_sizes)[::-1]
         ordered_doc_sizes = sorted(doc_sizes)[::-1]
@@ -165,19 +190,12 @@ class Model(nn.Module):
         unsorted_doc_outputs = [doc_outputs[i] for i in unsort(ordered_document_idx)]
         sentence_outputs = torch.cat(unsorted_doc_outputs, 0)
 
-        # Process the outputs for each task using the separate processing layers
-        sentence_features = self.sentence_processing(sentence_outputs)
-        document_features = self.document_processing(sentence_outputs)
-
-        # Generate predictions for each task
-        sentence_preds = self.sentence_head(sentence_features)
-        document_preds = self.document_head(document_features)
-
-        return sentence_preds, document_preds
+        x = self.h2s(sentence_outputs)
+        return x
 
 
 def create():
     sentence_encoder = SentenceEncodingRNN(input_size=300,
-                                           hidden=256,
-                                           num_layers=3)
-    return Model(sentence_encoder, hidden=256, num_layers=3)
+                                           hidden=512,
+                                           num_layers=4)
+    return Model(sentence_encoder, hidden=512, num_layers=4)

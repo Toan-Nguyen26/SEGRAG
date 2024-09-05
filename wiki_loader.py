@@ -203,10 +203,10 @@ class WikipediaDataSet(Dataset):
             return process_json_file(document, self.word2vec, remove_special_tokens=True)
         else:
             path = self.textfiles[index]
-            # return read_concated_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
-            #                     high_granularity=self.high_granularity)
-            return read_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
+            return read_concated_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
                                 high_granularity=self.high_granularity)
+            # return read_wiki_file(Path(path), self.word2vec, ignore_list=True, remove_special_tokens=True,
+            #                     high_granularity=self.high_granularity)
     def __len__(self):
         if self.is_json:
             return len(self.documents)
