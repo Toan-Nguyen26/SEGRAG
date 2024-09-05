@@ -50,11 +50,7 @@ def process_json_file(document, word2vec, remove_special_tokens=False, return_as
     content = document['content']
     doc_id = document['id']
     sentences = split_text_into_sentences(content)
-    # i = 0
     for sentence in sentences:
-        # print("Sentence:", sentence ,"index:", i)
-        # print("=====================================")
-        # i = i + 1
         is_list_sentence = wiki_utils.get_list_token() + "." == sentence.encode('utf-8')
         if is_list_sentence:
             continue

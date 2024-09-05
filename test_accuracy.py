@@ -18,11 +18,15 @@ from wiki_loader import WikipediaDataSet
 import accuracy
 from models import naive
 from timeit import default_timer as timer
+# import nltk
+# import matplotlib.pyplot as plt
 
+# Ensure you have the necessary NLTK data files
+# nltk.download('punkt')
 
 logger = utils.setup_logger(__name__, 'test_accuracy.log')
 document = None
-
+json_file_path = None
 def softmax(x):
     max_each_row = np.max(x, axis=1, keepdims=True)
     exps = np.exp(x - max_each_row)
@@ -110,13 +114,8 @@ def main(args):
         
         if args.dataset:
             print('running on dataset: ', args.dataset)
-            if(args.dataset == 'squad'):
-                document = open_file("RAG\data\squad\concatenated_documents.json")
-                dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_file="RAG\data\squad\concatenated_documents.json")
-            elif(args.dataset == 'narrative_qa'):
-                json_file="RAG\\data\\narrativeqa\\concatenated_documents.json"
-                document = open_file(json_file)
-                dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_file=json_file)
+            json_file_path = f"RAG\data\{args.dataset}\individual_documents"
+            dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_data_path=json_file_path)
         elif args.wiki:
             if (args.wiki_folder):
                 dataset = WikipediaDataSet(dataset_path, word2vec, folder=True, high_granularity=False)
@@ -169,9 +168,20 @@ def main(args):
                     acc.update(h,t, sentences_length=sentences_length)
                     # Update the segmented_sentences field in the document JSON file
                     if args.dataset:
-                        for doc in document:
-                            if doc['id'] == paths[k]:
-                                doc['segmented_sentences'] = h.tolist()
+                        for file_name in os.listdir(json_file_path):
+                           if file_name.endswith('.json') and file_name[:-5] == str(paths[k]):
+                                file_path = os.path.join(json_file_path, file_name)
+                                with open(file_path, 'r', encoding='utf-8') as json_file:
+                                    data = json.load(json_file)
+                                data['segmented_sentences'] = h.tolist()
+                                # document_content = data.get('content', '')
+                                # num_sentences = data.get('num_sentences', 0)
+                                # words = nltk.word_tokenize(document_content)
+                                # num_words = len(words)
+
+                                
+                                with open(file_path, 'w', encoding='utf-8') as json_file:
+                                    json.dump(data, json_file, ensure_ascii=False, indent=4)
                                 break
 
                     # Add this block to log or write out the segment details
@@ -200,12 +210,12 @@ def main(args):
         logger.info('Average accuracy: %s', average_accuracy)
         logger.info('Pk: {:.4}.'.format(calculated_pk))
         logger.info('F1: {:.4}.'.format(preds_stats.get_f1()))
-        if args.dataset:
-            print('running on dataset: ', args.dataset)
-            if(args.dataset == 'squad'):
-                close_file("RAG\data\squad\concatenated_documents.json", document)
-            elif(args.dataset == 'narrative_qa'):
-                close_file("RAG\data\narrativeqa\concatenated_documents.json", document)
+        # if args.dataset:
+        #     print('running on dataset: ', args.dataset)
+        #     if(args.dataset == 'squad'):
+        #         close_file("RAG\data\squad\concatenated_documents.json", document)
+        #     elif(args.dataset == 'narrative_qa'):
+        #         close_file("RAG\data\narrativeqa\concatenated_documents.json", document)
 
 
         end = timer()
@@ -228,6 +238,7 @@ if __name__ == '__main__':
     parser.add_argument('--seg_threshold', help='Threshold for binary classificetion', type=float, default=0.4)
     parser.add_argument('--calc_word', help='Whether to calc P_K by word', action='store_true')
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa', type=str, default=None)
+    parser.add_argument('--is_json', help='Are we loading a json_file for RAG', type=bool, default=False)
 
 
     main(parser.parse_args())
