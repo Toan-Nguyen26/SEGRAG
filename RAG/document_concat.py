@@ -129,8 +129,8 @@ def create_individual_documents_narrativeqa_json(output_dir='data/narrativeqa/in
             content = clean_text(preprocess_text(item['document']['text']))
             
             # Skip the document if the content length exceeds 150,000 characters
-            if len(content) > 100_000:
-                print(f"Skipping document '{document_title}' due to content length > 100k characters.")
+            if len(content) < 50_000 or len(content) > 100_000:
+                print(f"Skipping document '{document_title}' due to content length > 50k characters.")
                 continue
 
             # Create a new document entry
@@ -224,15 +224,106 @@ def create_concatenated_documents_quality_json(output_dir='data/quality/individu
     # Process the data_list as needed
     print(data_list)
 
+def create_concantenated_documents_qasper_json(output_dir='data/qasper/individual_documents', num_files=10):
+    # Load the NarrativeQA dataset (train split)
+    dataset = load_dataset('allenai/qasper', split='train')
+
+    # Initialize variables
+    unique_titles = set()
+    document_id = 1  # Start document IDs from 1
+    total_qas_count = 0
+    
+    # Create the output directory if it doesn't exist
+    os.makedirs(output_dir, exist_ok=True)
+
+    for item in dataset:
+        document_title = item['title']
+        
+        # Check if we've reached the maximum number of unique titles
+        if len(unique_titles) >= num_files:
+            break
+
+        # Process the document only if its title is not already in the set
+        if document_title not in unique_titles:
+            document_entry = DocumentEntry(id=document_id, title=document_title)
+            doc_content = ""
+            for paragraph in item["full_text"]["paragraphs"]:
+                for content in paragraph:
+                    doc_content += content  # Use string concatenation
+                doc_content += "\n"  # Add a newline character
+            content = clean_text(preprocess_text(doc_content))
+            
+
+            # Create a new document entry
+            document_entry = DocumentEntry(id=document_id, title=document_title, content=content, num_sentences=count_sentences(content))
+
+            # Add the title to the set of unique titles
+            unique_titles.add(document_title)
+            document_id += 1
+
+            # Create a question-answer pair
+            qa_entries = []
+
+            qas = item['qas']
+            # Iterate through all the questions
+            for q_idx, question in enumerate(qas['question']):
+                question_text = question
+                
+                # Get the corresponding answer list for the current question
+                answer_list = qas['answers'][q_idx]['answer']
+                
+                # For each answer, extract its details
+                for ans in answer_list:
+                    # Multiple contexts (evidences) are allowed for each answer
+                    evidence_list = ans.get('evidence', [])
+                    answer_text = ans.get('free_form_answer', "")
+                    extractive_spans = ans.get('extractive_spans', [])
+
+                    # Create a QAEntry for each context
+                    for evidence in evidence_list:
+                        # Concatenate the extractive spans if they exist (optional)
+                        if extractive_spans:
+                            evidence = f"{evidence} (spans: {', '.join(extractive_spans)})"
+                        
+                        # Create a QAEntry for each question-context-answer combination
+                        qa_pair = QAEntry(
+                            question=question_text,
+                            context=evidence,
+                            answers=answer_text
+                        )
+                        
+                        # Add the QAEntry to the list
+                        qa_entries.append(qa_pair)
+            
+            pprint(qa_entries)
+            document_entry.qas.append(qa_entries)
+            # Increment the total_qas counter
+            total_qas_count += 1
+
+            # Create a valid filename using the ID and title
+            filename = sanitize_filename(f"{document_entry.id}.json")
+            filepath = os.path.join(output_dir, filename)
+            
+            # Save the document entry to a JSON file
+            with open(filepath, 'w', encoding='utf-8') as json_file:
+                json.dump(document_entry.to_dict(), json_file, ensure_ascii=False, indent=4)
+
+            print(f"Saved document '{filename}' with {len(document_entry.qas)} Q&A pairs.")
+
+    print(f"Total number of unique documents saved: {len(unique_titles)}")
+    print(f"Total number of question-answer pairs (qas): {total_qas_count}")
+
 def main(args):
     if args.dataset == 'squad':
         create_concatenated_documents_squad_json(num_files=args.num_files)
-    elif args.dataset == 'narrative_qa':
+    elif args.dataset == 'narrativeqa':
         create_individual_documents_narrativeqa_json(num_files=args.num_files)
     elif args.dataset == 'quality':
         create_concatenated_documents_quality_json(num_files=args.num_files)
+    elif args.dataset == 'qasper':
+        create_concantenated_documents_qasper_json(num_files=args.num_files)
     else:
-        raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'squad' or 'narrative_qa' or 'quality'.")
+        raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'squad' or 'narrativeqa' or 'quality'.")
 
 if __name__ == '__main__':
     parser = ArgumentParser()
