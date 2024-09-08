@@ -1,18 +1,27 @@
 from dataclasses import dataclass, field
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 @dataclass
 class QAEntry:
     question: str
     context: str
     answers: List[str]
+    unanswerable: Optional[bool] = None
+    yes_no: Optional[bool] = None
+
 
     def to_dict(self):
-        return {
+        result = {
             'question': self.question,
             'context': self.context,
             'answers': self.answers
         }
+        if self.unanswerable is not None:
+            result['unanswerable'] = self.unanswerable
+        if self.yes_no is not None:
+            result['yes_no'] = self.yes_no
+        return result
+
 
 @dataclass
 class DocumentEntry:

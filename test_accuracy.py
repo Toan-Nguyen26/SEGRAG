@@ -18,6 +18,7 @@ from wiki_loader import WikipediaDataSet
 import accuracy
 from models import naive
 from timeit import default_timer as timer
+import random
 # import nltk
 # import matplotlib.pyplot as plt
 
@@ -135,7 +136,7 @@ def main(args):
             acc =  accuracy.Accuracy()
 
             # Add this line at the start of the main function to open a file for writing segment details
-            segment_output_file = open('segment_output.txt', 'w')
+            segment_output_file = open(f'{args.dataset}_segment_output.txt', 'w')
 
             for i, (data, targets, paths) in enumerate(dl):
                 if i == args.stop_after:
@@ -146,7 +147,11 @@ def main(args):
                 targets_var = Variable(maybe_cuda(torch.cat(targets, 0), args.cuda), requires_grad=False)
                 batch_loss = 0
                 output_prob = softmax(output.data.cpu().numpy())
-                output_seg = output_prob[:, 1] > args.seg_threshold
+                random_percentile = random.uniform(97, 98)
+                output_probability = output_prob[:, 1]
+                # seg_threshold = np.percentile(output_probability, random_percentile)
+                # print(seg_threshold)
+                output_seg = output_probability > args.seg_threshold
                 target_seg = targets_var.data.cpu().numpy()
                 batch_accurate = (output_seg == target_seg).sum()
                 total_accurate += batch_accurate
@@ -186,10 +191,13 @@ def main(args):
 
                     # Add this block to log or write out the segment details
                     # Add this block to log or write out the segment details along with the corresponding file path
+                    top_5_values = np.sort(output_probability)[-5:]
+                    lowest_value = np.min(output_probability)
+                    segment_output_file.write(f'Top 5 value: {top_5_values}\n')
+                    segment_output_file.write(f'Lowest value: {lowest_value}\n')
                     segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k]}:\n')  # Include the file path
                     segment_output_file.write(f'Segments: {h}\n')
                     segment_output_file.write(f'Target Segments: {t}\n\n')
-
 
                     current_target_idx = to_idx
 
@@ -239,6 +247,6 @@ if __name__ == '__main__':
     parser.add_argument('--calc_word', help='Whether to calc P_K by word', action='store_true')
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa', type=str, default=None)
     parser.add_argument('--is_json', help='Are we loading a json_file for RAG', type=bool, default=False)
-
-
+    parser.add_argument('--min_range', help='Min percentile', type=bool, default=95)
+    parser.add_argument('--max_range', help='Max percentile', type=bool, default=98)
     main(parser.parse_args())
