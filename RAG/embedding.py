@@ -64,12 +64,12 @@ def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=4000):
     return chunks
 
 
-def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None, doc_id=None):
+def chunk_text_by_segment(text, seg_array, tokenizer, title=None, doc_id=None):
     # Load spaCy model for sentence segmentation
     nlp = spacy.load("en_core_web_sm")
     doc = nlp(text)
     sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
-
+    max_chunk_size=8192
     chunks = []
     current_chunk = []
     total_chunks = 0  # Track the total number of chunks
@@ -87,8 +87,8 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
         current_chunk.extend(sentence_tokens.tolist())
 
         # Check if the current chunk exceeds the token limit or if it's the end of a segment
-        # if len(current_chunk) >= max_chunk_size or is_segment_end == 1:
-        if is_segment_end == 1:
+        if len(current_chunk) >= max_chunk_size or is_segment_end == 1:
+        # if is_segment_end == 1:
             # Store chunk with its size
             chunk_size = len(current_chunk)
             chunks.append((current_chunk, chunk_size))
@@ -153,13 +153,13 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             if args.chunk_type == '256' or args.chunk_type == '512':
                 text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             else:
-                text_chunks = chunk_text_by_segment(content, segmented_sentences, chunk_size, tokenizer, title, doc_id)
+                text_chunks = chunk_text_by_segment(content, segmented_sentences, tokenizer, title, doc_id)
             # text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             # text_chunks = split_text_into_segmented_chunks_at_word_level(num_sentences, content, max_chunk_size=chunk_size, tokenizer=tokenizer, segmented_sentences=segmented_sentences)
             print(f"Processing document {doc_id} with {len(text_chunks)} chunks")
             # Iterate through each chunk and its size
             chunk_id = 1
-            for chunk_text, chunk_size in text_chunks:
+            for chunk_text, c_size in text_chunks:
                 # Encode the chunk
                 embedding = model.encode(chunk_text)
 
@@ -169,7 +169,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
                     'doc_id': doc_id,
                     'title': title,
                     'chunk': chunk_text,
-                    'chunk_size': chunk_size,  # Include the size of the chunk
+                    'chunk_size': c_size,  # Include the size of the chunk
                     'embedding': embedding.tolist()  # Convert to list for JSON serialization
                 })
                 chunk_id += 1
