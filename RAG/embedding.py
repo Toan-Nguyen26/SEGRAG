@@ -64,7 +64,7 @@ def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=4000):
     return chunks
 
 
-def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None):
+def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None, doc_id=None):
     # Load spaCy model for sentence segmentation
     nlp = spacy.load("en_core_web_sm")
     doc = nlp(text)
@@ -74,7 +74,7 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
     current_chunk = []
     total_chunks = 0  # Track the total number of chunks
 
-    logging.info(f"Processing {title}.")
+    logging.info(f"Processing {title} with id {doc_id}.")
     for i, is_segment_end in enumerate(seg_array):
         # Check if the current segment index exceeds the number of sentences
         if i >= len(sentences):
@@ -87,13 +87,16 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
         current_chunk.extend(sentence_tokens.tolist())
 
         # Check if the current chunk exceeds the token limit or if it's the end of a segment
-        if len(current_chunk) >= max_chunk_size or is_segment_end == 1:
+        # if len(current_chunk) >= max_chunk_size or is_segment_end == 1:
+        if is_segment_end == 1:
             # Store chunk with its size
             chunk_size = len(current_chunk)
             chunks.append((current_chunk, chunk_size))
             
             # Log the chunk details
             logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
+            if chunk_size > max_chunk_size:
+                logging.info(f"Chunk size exceeds the limit: {chunk_size} tokens (Limit: {max_chunk_size}).")
             total_chunks += 1
             current_chunk = []  # Reset the chunk
     
@@ -150,7 +153,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             if args.chunk_type == '256' or args.chunk_type == '512':
                 text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             else:
-                text_chunks = chunk_text_by_segment(content, segmented_sentences, chunk_size, tokenizer, title)
+                text_chunks = chunk_text_by_segment(content, segmented_sentences, chunk_size, tokenizer, title, doc_id)
             # text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             # text_chunks = split_text_into_segmented_chunks_at_word_level(num_sentences, content, max_chunk_size=chunk_size, tokenizer=tokenizer, segmented_sentences=segmented_sentences)
             print(f"Processing document {doc_id} with {len(text_chunks)} chunks")
