@@ -6,9 +6,10 @@ torch
 pypdf
 sentence-transformers
 gpt4all
-faiss-cpu
+faiss-gpu
 openai
 langchain-cohere
 bs4
 spacy
 tf-keras
+datasets

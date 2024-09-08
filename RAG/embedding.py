@@ -69,7 +69,6 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
     nlp = spacy.load("en_core_web_sm")
     doc = nlp(text)
     sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
-    
 
     chunks = []
     current_chunk = []
@@ -89,29 +88,30 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
 
         # Check if the current chunk exceeds the token limit or if it's the end of a segment
         if len(current_chunk) >= max_chunk_size or is_segment_end == 1:
-        # if is_segment_end == 1:
-            chunks.append(current_chunk)
-            # Log the chunk details
+            # Store chunk with its size
             chunk_size = len(current_chunk)
+            chunks.append((current_chunk, chunk_size))
+            
+            # Log the chunk details
             logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
             total_chunks += 1
             current_chunk = []  # Reset the chunk
     
     # Add any remaining tokens
     if current_chunk:
-        chunks.append(current_chunk)
         chunk_size = len(current_chunk)
+        chunks.append((current_chunk, chunk_size))
         logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
         total_chunks += 1
 
-    # Convert tokens back to text and print token counts
-    chunk_texts = [tokenizer.decode(torch.tensor(chunk), skip_special_tokens=True) for chunk in chunks]
+    # Convert tokens back to text and return both the text and chunk size
+    chunk_texts_and_sizes = [(tokenizer.decode(torch.tensor(chunk), skip_special_tokens=True), size) for chunk, size in chunks]
 
-    for i, chunk_text in enumerate(chunk_texts):
-        logging.info(f"Finalized Chunk {i + 1}: {len(chunk_text.split())} tokens.")
     logging.info(f"Total number of chunks: {total_chunks}")
     logging.info("--------------------------------------------------")
-    return chunk_texts
+
+    return chunk_texts_and_sizes
+
 
 def split_text_into_segmented_chunks_at_word_level(num_sentences, text, max_chunk_size=512, tokenizer=None, segmented_sentences=None):
     nlp = spacy.load("en_core_web_sm")
@@ -191,20 +191,22 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             # text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             # text_chunks = split_text_into_segmented_chunks_at_word_level(num_sentences, content, max_chunk_size=chunk_size, tokenizer=tokenizer, segmented_sentences=segmented_sentences)
             print(f"Processing document {doc_id} with {len(text_chunks)} chunks")
-            for chunk_text in text_chunks:
+            # Iterate through each chunk and its size
+            for chunk_text, chunk_size in text_chunks:
                 # Encode the chunk
                 embedding = model.encode(chunk_text)
                 chunk_uuid = str(uuid.uuid4())  # Generate a unique UUID for each chunk
 
                 # Store the embedding and related information
-                embeddings.append(embedding)
                 document_chunks.append({
                     'id': chunk_uuid,
                     'doc_id': doc_id,
                     'title': title,
                     'chunk': chunk_text,
+                    'chunk_size': chunk_size,  # Include the size of the chunk
                     'embedding': embedding.tolist()  # Convert to list for JSON serialization
                 })
+                embeddings.append(embedding)
 
     # Convert embeddings to a numpy array
     embeddings = np.array(embeddings)
