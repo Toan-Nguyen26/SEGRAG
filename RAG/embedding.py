@@ -96,7 +96,7 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
             # Log the chunk details
             logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
             if chunk_size > max_chunk_size:
-                logging.info(f"Chunk size exceeds the limit: {chunk_size} tokens (Limit: {max_chunk_size}).")
+                logging.info(f"Chunk size exceeds the limit: {chunk_size} (Limit: {max_chunk_size}).")
             total_chunks += 1
             current_chunk = []  # Reset the chunk
     
