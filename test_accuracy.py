@@ -149,9 +149,9 @@ def main(args):
                 output_prob = softmax(output.data.cpu().numpy())
                 random_percentile = random.uniform(97, 98)
                 output_probability = output_prob[:, 1]
-                seg_threshold = np.percentile(output_probability, random_percentile)
-                print(seg_threshold)
-                output_seg = output_probability > seg_threshold
+                # seg_threshold = np.percentile(output_probability, random_percentile)
+                # print(seg_threshold)
+                output_seg = output_probability > args.seg_threshold
                 target_seg = targets_var.data.cpu().numpy()
                 batch_accurate = (output_seg == target_seg).sum()
                 total_accurate += batch_accurate

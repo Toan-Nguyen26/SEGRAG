@@ -15,6 +15,10 @@ from langchain_community.embeddings import GPT4AllEmbeddings
 from langchain.docstore.document import Document
 import spacy
 
+model = SentenceTransformer("intfloat/e5-mistral-7b-instruct")
+tokenizer = AutoTokenizer.from_pretrained("sentence-transformers/multi-qa-mpnet-base-dot-v1")
+
+
 def split_text_into_segmented_chunks_at_sentences_level(num_sentences, text, max_chunk_size=512, tokenizer=None, segmented_sentences=None):
     nlp = spacy.load('en_core_web_sm')
     doc = nlp(text)
