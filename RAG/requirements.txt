@@ -13,3 +13,4 @@ bs4
 spacy
 tf-keras
 datasets
+python-dotenv

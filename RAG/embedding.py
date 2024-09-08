@@ -69,38 +69,44 @@ def chunk_text_by_segment(text, seg_array, tokenizer, title=None, doc_id=None):
     nlp = spacy.load("en_core_web_sm")
     doc = nlp(text)
     sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
-    max_chunk_size=8192
+    max_chunk_size = 8192
     chunks = []
     current_chunk = []
     total_chunks = 0  # Track the total number of chunks
 
     logging.info(f"Processing {title} with id {doc_id}.")
+    
     for i, is_segment_end in enumerate(seg_array):
-        # Check if the current segment index exceeds the number of sentences
         if i >= len(sentences):
             break
 
         # Tokenize the current sentence
-        sentence_tokens = tokenizer(sentences[i], return_tensors='pt', truncation=False)['input_ids'][0]
+        sentence_tokens = tokenizer(sentences[i], return_tensors='pt', truncation=False)['input_ids'][0].tolist()
         
-        # Add sentence tokens to the current chunk
-        current_chunk.extend(sentence_tokens.tolist())
-
-        # Check if the current chunk exceeds the token limit or if it's the end of a segment
-        if len(current_chunk) >= max_chunk_size or is_segment_end == 1:
-        # if is_segment_end == 1:
-            # Store chunk with its size
+        # Check if adding the new sentence tokens would exceed max_chunk_size
+        if len(current_chunk) + len(sentence_tokens) > max_chunk_size:
+            # Store the current chunk
             chunk_size = len(current_chunk)
             chunks.append((current_chunk, chunk_size))
             
-            # Log the chunk details
             logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
             if chunk_size > max_chunk_size:
                 logging.info(f"Chunk size exceeds the limit: {chunk_size} tokens (Limit: {max_chunk_size}).")
             total_chunks += 1
             current_chunk = []  # Reset the chunk
-    
-    # Add any remaining tokens
+
+        # Add sentence tokens to the current chunk
+        current_chunk.extend(sentence_tokens)
+
+        # If it's the end of a segment, store the current chunk
+        if is_segment_end == 1:
+            chunk_size = len(current_chunk)
+            chunks.append((current_chunk, chunk_size))
+            logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
+            total_chunks += 1
+            current_chunk = []  # Reset the chunk
+
+    # Add any remaining tokens after the loop
     if current_chunk:
         chunk_size = len(current_chunk)
         chunks.append((current_chunk, chunk_size))
@@ -114,7 +120,6 @@ def chunk_text_by_segment(text, seg_array, tokenizer, title=None, doc_id=None):
     logging.info("--------------------------------------------------")
 
     return chunk_texts_and_sizes
-
 def determine_chunk_size():
     if args.chunk_type == '256':
         model.max_seq_length = 256
