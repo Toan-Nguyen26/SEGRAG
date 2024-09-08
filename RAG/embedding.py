@@ -112,43 +112,6 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
 
     return chunk_texts_and_sizes
 
-
-def split_text_into_segmented_chunks_at_word_level(num_sentences, text, max_chunk_size=512, tokenizer=None, segmented_sentences=None):
-    nlp = spacy.load("en_core_web_sm")
-    doc = nlp(text)
-    
-    sentences = list(doc.sents)  
-    chunks = []
-    current_chunk = []
-    sentence_index = 0
-    
-    for sentence in sentences:
-        words = sentence.text.split() 
-        
-        for word in words:
-            potential_chunk = ' '.join(current_chunk + [word]).strip()
-            potential_tokens = tokenizer(potential_chunk, return_tensors='pt', truncation=True, max_length=max_chunk_size, padding=False)['input_ids'][0]
-            
-            if len(potential_tokens) >= max_chunk_size:
-                # Finalize the current chunk and start a new one
-                chunks.append(' '.join(current_chunk).strip())
-                current_chunk = [word]  # Start the new chunk with the current word
-            else:
-                current_chunk.append(word)
-
-            # If the end of a segment is reached, finalize the chunk
-            if segmented_sentences[sentence_index] == 1 and word == words[-1]:
-                chunks.append(' '.join(current_chunk).strip())
-                current_chunk = []
-        
-        sentence_index += 1
-
-    # Add any remaining words as the last chunk
-    if current_chunk:
-        chunks.append(' '.join(current_chunk).strip())
-    
-    return chunks
-
 def determine_chunk_size():
     if args.chunk_type == '256':
         model.max_seq_length = 256
@@ -192,20 +155,21 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             # text_chunks = split_text_into_segmented_chunks_at_word_level(num_sentences, content, max_chunk_size=chunk_size, tokenizer=tokenizer, segmented_sentences=segmented_sentences)
             print(f"Processing document {doc_id} with {len(text_chunks)} chunks")
             # Iterate through each chunk and its size
+            chunk_id = 1
             for chunk_text, chunk_size in text_chunks:
                 # Encode the chunk
                 embedding = model.encode(chunk_text)
-                chunk_uuid = str(uuid.uuid4())  # Generate a unique UUID for each chunk
 
                 # Store the embedding and related information
                 document_chunks.append({
-                    'id': chunk_uuid,
+                    'chunk_id': chunk_id,
                     'doc_id': doc_id,
                     'title': title,
                     'chunk': chunk_text,
                     'chunk_size': chunk_size,  # Include the size of the chunk
                     'embedding': embedding.tolist()  # Convert to list for JSON serialization
                 })
+                chunk_id += 1
                 embeddings.append(embedding)
 
     # Convert embeddings to a numpy array
