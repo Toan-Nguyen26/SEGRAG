@@ -129,7 +129,7 @@ def create_individual_documents_narrativeqa_json(output_dir='data/narrativeqa/in
             content = clean_text(preprocess_text(item['document']['text']))
             
             # Skip the document if the content length exceeds 150,000 characters
-            if len(content) < 50_000 or len(content) > 100_000:
+            if len(content) > 100_000:
                 print(f"Skipping document '{document_title}' due to content length > 50k characters.")
                 continue
 

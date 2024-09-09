@@ -19,28 +19,11 @@ import logging
 model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
 
-
-# def chunk_text_by_tokens(text, chunk_size, tokenizer):
-#     """
-#     This function chunks the text into chunks of `chunk_size` tokens.
-#     """
-#     tokens = tokenizer(text, return_tensors='pt', truncation=False)['input_ids'][0]
-#     chunks = []
-#     for i in range(0, len(tokens), chunk_size):
-#         chunk_tokens = tokens[i:i+chunk_size]
-#         chunk_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-#         chunks.append(chunk_text)
-#     print(len(chunks))
-#     return chunks
-
 def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=4000):
-    """
-    This function chunks the text into smaller chunks of tokens after splitting the text into smaller
-    word-based chunks to avoid tokenizing the entire text at once.
-    """
     # First, split the text into smaller word chunks to avoid tokenizing large texts at once
     words = text.split()  # Split the text into words
     chunks = []
+    total_chunks = 0  # Track the total number of chunks
     
     # Iterate through the words and create smaller chunks of words
     for i in range(0, len(words), max_words_per_chunk):
@@ -57,8 +40,11 @@ def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=4000):
         # Further split tokens into model's max token length (chunk_size)
         for j in range(0, len(tokens), chunk_size):
             chunk_tokens = tokens[j:j + chunk_size]
-            chunk_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-            chunks.append(chunk_text)
+            decoded_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
+            chunks.append((decoded_text, len(chunk_tokens)))  # Return both text and token size as a tuple
+            total_chunks += 1
+            print(f"Chunk {total_chunks}: {len(chunk_tokens)} tokens.")
+            logging.info(f"Chunk {total_chunks}: {len(chunk_tokens)} tokens.")
     
     print(f"Number of token chunks: {len(chunks)}")
     return chunks
@@ -120,13 +106,17 @@ def chunk_text_by_segment(text, seg_array, tokenizer, title=None, doc_id=None):
     logging.info("--------------------------------------------------")
 
     return chunk_texts_and_sizes
+
 def determine_chunk_size():
-    if args.chunk_type == '256':
-        model.max_seq_length = 256
-        return 256
+    if args.chunk_type == '1024':
+        model.max_seq_length = 1024
+        return 1024
     elif args.chunk_type == '512':
         model.max_seq_length = 512
         return 512
+    elif args.chunk_type == '2048':
+        model.max_seq_length = 2048
+        return 2048
     else:
         model.max_seq_length = 8192
         return 8192
@@ -155,7 +145,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             segmented_sentences = doc['segmented_sentences']
             num_sentences = doc['num_sentences']
             # Split the text into smaller chunks that can be tokenized within model limits
-            if args.chunk_type == '256' or args.chunk_type == '512':
+            if args.chunk_type == '256' or args.chunk_type == '512' or args.chunk_type == '1024' or args.chunk_type == '2048':
                 text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             else:
                 text_chunks = chunk_text_by_segment(content, segmented_sentences, tokenizer, title, doc_id)
@@ -203,7 +193,7 @@ def main(args):
     if args.dataset:
         json_directory_path = f'data/{args.dataset}/individual_documents'
         # embedding_testing()
-        logging.basicConfig(filename=f'{args.dataset}_embedding.txt', level=logging.INFO)
+        logging.basicConfig(filename=f'{args.dataset}_{args.chunk_type}_embedding.txt', level=logging.INFO)
         create_segmendtaion_faiss_index_from_directory(json_directory_path=json_directory_path, 
                                      output_faiss_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index', 
                                      output_ids_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json')
