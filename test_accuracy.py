@@ -19,6 +19,7 @@ import accuracy
 from models import naive
 from timeit import default_timer as timer
 import random
+from transformers import AutoTokenizer
 # import nltk
 # import matplotlib.pyplot as plt
 
@@ -28,6 +29,8 @@ import random
 logger = utils.setup_logger(__name__, 'test_accuracy.log')
 document = None
 json_file_path = None
+# Initialize the tokenizer
+tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
 def softmax(x):
     max_each_row = np.max(x, axis=1, keepdims=True)
     exps = np.exp(x - max_each_row)
@@ -63,6 +66,20 @@ def close_file(file_path, document):
     print(f"Saved the updated document to {file_path}")
     return
 
+def adjust_segment_for_length(output_prob, token_lengths, max_chunk_size=3000, threshold=0.4, scaling_factor_base=1.5):
+
+    segment_size = sum(token_lengths)
+    output_prob = np.array(output_prob)
+    if segment_size > max_chunk_size:
+        excess_ratio = segment_size / max_chunk_size
+        scaling_factor = scaling_factor_base * excess_ratio
+        scaled_probs = output_prob * scaling_factor
+        adjusted_segments = scaled_probs > threshold
+    else:
+        adjusted_segments = output_prob > threshold
+
+    return adjusted_segments
+
 def main(args):
     start = timer()
 
@@ -90,12 +107,6 @@ def main(args):
             dataset_folders.append(args.wiki_folder)
         print('running on wikipedia')
     else:
-        # if (args.bySegLength):
-        #     dataset_folders = getSegmentsFolders(utils.config['choidataset'])
-        #     print('run on choi by segments length')
-        # else :
-        #     dataset_folders = [utils.config['choidataset']]
-        #     print('running on Choi')
         print('running on RAG dataset')
 
 
@@ -135,56 +146,83 @@ def main(args):
             total_loss = 0
             acc =  accuracy.Accuracy()
 
+            max_chunk_size = 3000
+            scaling_factor_base = 1.5
             # Add this line at the start of the main function to open a file for writing segment details
             segment_output_file = open(f'{args.dataset}_segment_output.txt', 'w')
-
+            
+            accumulated_probs = []  # Accumulate probabilities for sentences in a segment
             for i, (data, targets, paths) in enumerate(dl):
                 if i == args.stop_after:
                     break
-
+                
                 pbar.update()
                 output = model(data)
                 targets_var = Variable(maybe_cuda(torch.cat(targets, 0), args.cuda), requires_grad=False)
                 batch_loss = 0
                 output_prob = softmax(output.data.cpu().numpy())
-                random_percentile = random.uniform(97, 98)
+                random_percentile = random.uniform(96, 98)
                 output_probability = output_prob[:, 1]
-                # seg_threshold = np.percentile(output_probability, random_percentile)
+                seg_threshold = np.percentile(output_probability, random_percentile)
                 # print(seg_threshold)
                 output_seg = output_probability > args.seg_threshold
+                # output_seg = output_probability > seg_threshold
                 target_seg = targets_var.data.cpu().numpy()
                 batch_accurate = (output_seg == target_seg).sum()
                 total_accurate += batch_accurate
                 total_count += len(target_seg)
                 total_loss += batch_loss
                 preds_stats.add(output_seg,target_seg)
-
                 current_target_idx = 0
                 for k, t in enumerate(targets):
-                    document_sentence_count = len(t)
+                    document_sentence_count = len(t)          
                     sentences_length = [s.size()[0] for s in data[k]] if args.calc_word else None
                     to_idx = int(current_target_idx + document_sentence_count)
                     h = output_seg[current_target_idx: to_idx]
-                    # hypothesis and targets are missing classification of last sentence, and therefore we will add
-                    # 1 for both
                     h = np.append(h, [1])
-                    t = np.append(t.cpu().numpy(), [1])
+                    segment_output_file.write(f'original Segments: {h}\n')
+                    # =================================================================
+                    accumulated_token_lengths = []
+                    accumulated_probs = []
+                    start_idx = 0  # Track the start of the current segment
+                    content = paths[k][1]
+                    for i in range(len(h) - 1):
+                        sentence = content[i]
+                        sentence_length = len(tokenizer.encode(sentence, truncation=True))
 
+                        accumulated_token_lengths.append(sentence_length)
+                        accumulated_probs.append(output_probability[i])
+
+                        # If we encounter a `1` (end of a segment)
+                        if h[i] == 1:
+                            # Check if the accumulated segment is too long
+                            if sum(accumulated_token_lengths) > max_chunk_size:
+                                # Adjust the segmentation for the current segment
+                                adjusted_segments = adjust_segment_for_length(
+                                    accumulated_probs, 
+                                    accumulated_token_lengths, 
+                                    max_chunk_size, 
+                                    seg_threshold, 
+                                    scaling_factor_base
+                                )
+                                h[start_idx:i + 1] = np.logical_or(h[start_idx:i + 1], adjusted_segments)
+                                segment_output_file.write(f'New Segments: {h}\n')
+                            # Reset accumulators for the next segment
+                            accumulated_token_lengths = []
+                            accumulated_probs = []
+                            start_idx = i + 1 
+
+                    # =================================================================
+                    t = np.append(t.cpu().numpy(), [1])
                     acc.update(h,t, sentences_length=sentences_length)
                     # Update the segmented_sentences field in the document JSON file
                     if args.dataset:
                         for file_name in os.listdir(json_file_path):
-                           if file_name.endswith('.json') and file_name[:-5] == str(paths[k]):
+                           if file_name.endswith('.json') and file_name[:-5] == str(paths[k][0]):
                                 file_path = os.path.join(json_file_path, file_name)
                                 with open(file_path, 'r', encoding='utf-8') as json_file:
                                     data = json.load(json_file)
                                 data['segmented_sentences'] = h.tolist()
-                                # document_content = data.get('content', '')
-                                # num_sentences = data.get('num_sentences', 0)
-                                # words = nltk.word_tokenize(document_content)
-                                # num_words = len(words)
-
-                                
                                 with open(file_path, 'w', encoding='utf-8') as json_file:
                                     json.dump(data, json_file, ensure_ascii=False, indent=4)
                                 break
@@ -195,9 +233,8 @@ def main(args):
                     lowest_value = np.min(output_probability)
                     segment_output_file.write(f'Top 5 value: {top_5_values}\n')
                     segment_output_file.write(f'Lowest value: {lowest_value}\n')
-                    segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k]}:\n')  # Include the file path
-                    segment_output_file.write(f'Segments: {h}\n')
-                    segment_output_file.write(f'Target Segments: {t}\n\n')
+                    segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k][0]}:\n')  # Include the file path
+                    # segment_output_file.write(f'Target Segments: {t}\n\n')
 
                     current_target_idx = to_idx
 
@@ -208,8 +245,6 @@ def main(args):
             segment_output_file.close()
 
         average_loss = total_loss / len(dl)
-        # print('Total accurate: ' + str(total_accurate))
-        # print('Total count: ' + str(total_count))
         average_accuracy = total_accurate / total_count
         calculated_pk, _ = acc.calc_accuracy()
 
@@ -218,12 +253,6 @@ def main(args):
         logger.info('Average accuracy: %s', average_accuracy)
         logger.info('Pk: {:.4}.'.format(calculated_pk))
         logger.info('F1: {:.4}.'.format(preds_stats.get_f1()))
-        # if args.dataset:
-        #     print('running on dataset: ', args.dataset)
-        #     if(args.dataset == 'squad'):
-        #         close_file("RAG\data\squad\concatenated_documents.json", document)
-        #     elif(args.dataset == 'narrative_qa'):
-        #         close_file("RAG\data\narrativeqa\concatenated_documents.json", document)
 
 
         end = timer()

@@ -3,118 +3,27 @@ import json
 import numpy as np
 import os
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.cluster import DBSCAN
-from sklearn.metrics.pairwise import cosine_distances
-from collections import defaultdict
+from cluster.cluster_helper_functions import group_chunks_by_doc_and_chunk_id, write_json_to_file, determine_average_threshold, determine_percentile_threshold, hard_code_graph, bron_kerbosch, bron_kerbosch_with_pivot
 import logging
+import faiss
 
 logging.basicConfig(filename='segment_clustering.log', level=logging.INFO, format='%(message)s')
-
-# =============================HELPER FUNCTIONS=============================== #
-# Function to determine the average similarity threshold
-
-
-def group_chunks_by_doc_and_chunk_id(documents):
-    grouped_data = defaultdict(dict)  # No need for 'chunks', just directly add to document ID
-    
-    for idx, doc in enumerate(documents):
-        doc_id = doc['doc_id'] 
-        chunk_id = doc['chunk_id']  
-        embedding = np.array(doc['embedding'])   
-        doc_title = doc['title']
-        text = doc['chunk']                      
-        chunk_size = doc['chunk_size']         
-
-        # Group by document ID and create chunk directly under doc_id
-        grouped_data[doc_title][chunk_id] = {
-            'embedding': embedding,
-            'text': text,
-            'chunk_size': chunk_size
-        }
-        
-    return grouped_data
-
-def write_json_to_file(output_data, output_file_path):
-    with open(output_file_path, 'w', encoding='utf-8') as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=4)
-    print(f"Output written to {output_file_path}")
-
-def determine_average_threshold(similarity_matrix, factor=1.0):
-    # Calculate the average similarity
-    similarities = similarity_matrix[np.triu_indices(len(similarity_matrix), k=1)]
-    average_similarity = np.mean(similarities)
-    return factor * average_similarity  
-
-def determine_percentile_threshold(similarity_matrix, percentile=90):
-    similarities = similarity_matrix[np.triu_indices(len(similarity_matrix), k=1)]
-    threshold = np.percentile(similarities, percentile)
-    return threshold
-
-def hard_code_graph(embeddings):
-    # graph = {
-    #     1: {2, 6, 8, 9},
-    #     2: {1, 6, 4, 7},
-    #     3: {4, 5},
-    #     4: {2, 3, 5, 7},
-    #     5: {3, 4},
-    #     6: {1, 2},
-    #     7: {2, 4},
-    #     8: {1, 9},
-    #     9: {1, 8}
-    # }
-    graph = {
-        1: {2, 3},
-        2: {1, 3},
-        3: {1,2,4},
-        4: {3},
-        5: {}
-    }
-    
-    print(f"The graph is {graph}")
-    return graph, set(graph.keys())
-
-def bron_kerbosch(R, P, X, cliques, graph):
-    logging.info("\nCalling Bron-Kerbosch with:")
-    logging.info(f"R (current clique): {R}")
-    logging.info(f"P (potential nodes): {P}")
-    logging.info(f"X (excluded nodes): {X}")
-    
-    if len(P) == 0 and len(X) == 0:
-        cliques.append(R)
-        logging.info(f"Maximal clique found: {R}")
-    else:
-        while P:
-            v = P.pop() 
-            logging.info(f"\nExploring vertex: {v}")
-            logging.info(f"Neighbors of {v}: {graph[v]}")
-            bron_kerbosch(R.union([v]), P.intersection(graph[v]), X.intersection(graph[v]), cliques, graph)
-            X.add(v)  
-            logging.info(f"Updated P: {P}")
-            logging.info(f"Updated X: {X}")
-
-def bron_kerbosch_with_pivot(R, P, X, cliques, graph):
-    if len(P) == 0 and len(X) == 0:
-        cliques.append(sorted(R))
-    else:
-        pivot = max(P.union(X), key=lambda u: len(graph.get(u, set())), default=None)
-        for v in list(P - graph.get(pivot, set())):
-            bron_kerbosch_with_pivot(R.union([v]), P.intersection(graph[v]), X.intersection(graph[v]), cliques, graph)
-            P.remove(v)
-            X.add(v) 
-
 # =============================MAIN FUNCTIONS=============================== #
 
+final_embeddings = []
+# Initialize a list to hold the merged results
+merged_results = []
+
 def create_relatedness_graph(embeddings, threshold):
-    graph = {i: set() for i in range(len(embeddings))}
+    graph = {i + 1: set() for i in range(len(embeddings))}
     similarity_matrix = cosine_similarity(embeddings)
     threshold = determine_percentile_threshold(similarity_matrix)
-    # print(determine_percentile_threshold(similarity_matrix))
     print(threshold)
     for i in range(len(embeddings)):
         for j in range(i + 1, len(embeddings)):
             if similarity_matrix[i, j] > threshold:
-                graph[i].add(j)
-                graph[j].add(i)
+                graph[i + 1].add(j + 1)
+                graph[j + 1].add(i + 1)
     print(f"The graph is {graph}")
     return graph, set(graph.keys())
 
@@ -198,44 +107,29 @@ def process_json_and_bron_kerbosch_with_text(grouped_data, embeddings, threshold
     
     # Create the new JSON structure with concatenated text and total length
     new_json = []
+    return
     
-    for segment in merged_segments:
-        # Concatenate the text and sum chunk sizes for the merged segment
-        concatenated_text = " ".join([grouped_data['texts'][i] for i in segment])
-        total_length = sum([grouped_data['chunk_sizes'][i] for i in segment])
-        
-        # Add the merged segment information to the new JSON structure
-        new_json.append({
-            'segment_indices': segment,  # Indices of the original chunks in the merged segment
-            'concatenated_text': concatenated_text,
-            'total_length': total_length
-        })
-    
-    return new_json
-
 def process_json_with_merged_segments(grouped_data, threshold=0.5):
-    new_json = []
-    
     for doc_id, doc_data in grouped_data.items():
-        # Get embeddings from document data
         embeddings = [doc_data[chunk]['embedding'] for chunk in doc_data]
-        title = f"Document {doc_id}"  # Use document ID as the title
+        first_chunk_key = next(iter(doc_data))
+        title = doc_data[first_chunk_key]["title"]
         print("\n")
         print(f"Embedding document {doc_id} with {len(embeddings)} chunks")
         # If the document has only one chunk, no need to calculate similarities
         if len(embeddings) == 1:
             # Treat this single chunk as its own segment
-            chunk_id = list(doc_data.keys())[0]  # Get the single chunk's ID
-            concatenated_text = doc_data[chunk_id]['text']
-            total_length = doc_data[chunk_id]['chunk_size']
-            
-            new_json.append({
+            chunk_id = list(doc_data.keys())[0]  # Get the single chunk's ID            
+            merged_results.append({
+                'chunk_id': doc_data[chunk_id]['chunk_id'],
+                'doc_id': doc_id,
                 'title': title,
-                'segment_indices': [chunk_id],
-                'concatenated_text': concatenated_text,
-                'total_length': total_length
+                'chunk': doc_data[chunk_id]['chunk'],
+                'chunk_size': doc_data[chunk_id]['chunk_size'],
+                "embedding": doc_data[chunk_id]['embedding'].tolist()
             })
             continue  # Skip to the next document
+
         # Step 1: Create relatedness graph based on embeddings and threshold
         relatedness_graph, all_segments = create_relatedness_graph(embeddings, threshold)
 
@@ -248,22 +142,60 @@ def process_json_with_merged_segments(grouped_data, threshold=0.5):
         # Step 4: Merge segments into bigger segments
         merged_segments = merge_segments(initial_segments, maximal_cliques)
 
-        # Step 5: For each merged segment, concatenate the text and sum the chunk sizes
+        new_chunk_id = 1
+        # Step 5: Create the new JSON structure with concatenated text and total length
         for segment in merged_segments:
-            # Use .get() method to avoid KeyError in case the key doesn't exist
-            concatenated_text = " ".join([doc_data.get(i, {}).get('text', '') for i in segment])
-            total_length = sum([doc_data.get(i, {}).get('chunk_size', 0) for i in segment])
+            current_chunk = []  # To hold concatenated text chunks
+            current_embedding_list = []  # To hold embeddings for averaging
+            total_length = 0  # Initialize total length
+
+            for chunk_id in segment:
+                chunk_text = doc_data[chunk_id]['chunk']
+                chunk_length = doc_data[chunk_id]['chunk_size']
+                chunk_embedding = doc_data[chunk_id]['embedding']
+                
+                # If adding this chunk exceeds the 3000 token limit, save the current segment and start a new one
+                if total_length + chunk_length > 3000:
+                    # Save the current segment
+                    concatenated_chunk = " ".join(current_chunk)
+                    embedding = np.mean(current_embedding_list, axis=0).tolist()
+                    
+                    merged_results.append({
+                        'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
+                        'doc_id': doc_id,
+                        'title': title,
+                        'chunk': concatenated_chunk,
+                        'chunk_size': total_length,
+                        "embedding": embedding
+                    })
+                    new_chunk_id += 1
+                    final_embeddings.append(embedding)
+                    
+                    # Reset for the next segment
+                    current_chunk = []
+                    current_embedding_list = []
+                    total_length = 0
+
+                # Add the chunk to the current segment
+                current_chunk.append(chunk_text)
+                current_embedding_list.append(chunk_embedding)
+                total_length += chunk_length
             
-            # Only add segments that have valid text
-            if concatenated_text.strip():  # Ensure there's actual text
-                new_json.append({
+            # Add the last segment if it hasn't been added yet
+            if current_chunk:
+                concatenated_chunk = " ".join(current_chunk)
+                embedding = np.mean(current_embedding_list, axis=0).tolist()
+                merged_results.append({
+                    'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
+                    'doc_id': doc_id,
                     'title': title,
-                    'segment_indices': [i for i in segment],  # Use the actual chunk IDs
-                    'concatenated_text': concatenated_text,
-                    'total_length': total_length
+                    'chunk': concatenated_chunk,
+                    'chunk_size': total_length,
+                    "embedding": embedding
                 })
-    
-    return new_json
+                new_chunk_id += 1
+                final_embeddings.append(embedding)
+        return
 
 # Example usage
 if __name__ == "__main__":
@@ -274,30 +206,37 @@ if __name__ == "__main__":
     # Provide the path to your JSON file
     json_file_path = f'data/{args.dataset}/seg/seg.json'
 
+    # TEST json path
+    # json_file_path = f'data/{args.dataset}/512/512.json'
+
+    output_faiss_path = f'data/{args.dataset}/segclus/segclus.index'
+    os.makedirs(os.path.dirname(output_faiss_path), exist_ok=True)
+    output_ids_path = f'data/{args.dataset}/segclus/segclus.json'
+
+    os.makedirs(os.path.dirname(output_ids_path), exist_ok=True)
     # Open and load the JSON file
     with open(json_file_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
 
     # Group chunks by document ID and chunk ID
     grouped_data = group_chunks_by_doc_and_chunk_id(data)
-    
-    # Initialize a list to hold the merged results
-    merged_results = []
-    
     # Iterate over each document in the grouped data
     for doc_id, doc_data in grouped_data.items():
         # Extract embeddings and process each document with Bron-Kerbosch algorithm
-        merged_json = process_json_with_merged_segments(grouped_data)
-        
-        # Add merged results to the list
-        merged_results.extend(merged_json)
+        process_json_with_merged_segments(grouped_data, merged_results)
 
-    # Create the directory if it doesn't exist
-    output_dir = f'data/{args.dataset}/segclus'
-    os.makedirs(output_dir, exist_ok=True)
+    # Save the updated JSON back to a file
+    with open(f'data/{args.dataset}/segclus/segclus.json', 'w', encoding='utf-8') as f:
+        json.dump(merged_results, f, indent=4)
+    # Convert embeddings to a numpy array
+    embeddings = np.array(final_embeddings)
 
-    # Now proceed to write the file
-    with open(f'{output_dir}/segclus.json', 'w', encoding='utf-8') as out_file:
-        json.dump(merged_results, out_file, indent=4)
+    # Create a FAISS index
+    embedding_dim = embeddings.shape[1]  # Dimension of the embeddings
+    index = faiss.IndexFlatL2(embedding_dim)  # L2 distance for similarity search
+    index.add(embeddings)  # Add the embeddings to the index
 
-    print(f"Output written to {output_dir}/segclus.json")
+    faiss.write_index(index, output_faiss_path)
+
+    print(f"FAISS index and document chunk information have been saved to {output_faiss_path}")
+

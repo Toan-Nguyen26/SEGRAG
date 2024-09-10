@@ -69,7 +69,7 @@ def process_json_file(document, word2vec, remove_special_tokens=False, return_as
                 data.append(sentence)
     if data:
         targets.append(len(data) - 1)
-    return data, targets, doc_id
+    return data, targets, [doc_id, sentences]
 
 def concat_document(path):
     concatenated_document = ""  # Initialize an empty string to store the concatenated document

@@ -130,6 +130,9 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     document_chunks = []
     chunk_size = determine_chunk_size()
 
+    total_chunk_size = 0  # Variable to track total size of all chunks
+    total_chunks_count = 0  # Variable to track total number of chunks
+
     # Iterate over each JSON file in the directory
     for json_filename in os.listdir(json_directory_path):
         if json_filename.endswith(".json"):
@@ -143,7 +146,6 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             doc_id = doc['id']
             title = doc['title']
             segmented_sentences = doc['segmented_sentences']
-            num_sentences = doc['num_sentences']
             # Split the text into smaller chunks that can be tokenized within model limits
             if args.chunk_type == '256' or args.chunk_type == '512' or args.chunk_type == '1024' or args.chunk_type == '2048':
                 text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
@@ -156,6 +158,8 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             chunk_id = 1
             for chunk_text, c_size in text_chunks:
                 # Encode the chunk
+                total_chunk_size += c_size
+                total_chunks_count += 1
                 embedding = model.encode(chunk_text)
 
                 # Store the embedding and related information
@@ -187,6 +191,8 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     with open(output_ids_path, 'w', encoding='utf-8') as id_file:
         json.dump(document_chunks, id_file, ensure_ascii=False, indent=4)
 
+    logging.info(f"Total number of chunks for the dataset : {total_chunk_size}")
+    logging.info(f"Avarage chunk size is : {total_chunk_size/total_chunks_count}")
     print(f"FAISS index and document chunk information have been saved to {output_faiss_path} and {output_ids_path}")
 
 def main(args):

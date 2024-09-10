@@ -10,6 +10,7 @@ import os
 import logging
 import re
 import evaluate
+from qa.qa_utils import bleu_smoothing, load_faiss_index_and_document_store, encode_query, search_faiss_index, get_top_chunks, ask_question_and_retrieve_chunks, generate_short_answer_from_chunks, load_json_folder
 # Load environment variables from the .env file
 load_dotenv()
 
@@ -20,90 +21,6 @@ client = OpenAI(
     # This is the default and can be omitted
     api_key=os.environ.get("OPENAI_API_KEY"),
 )
-
-# -----------------------------------HELPER FUNCTIONS-----------------------------------
-# Smoothing function for BLEU-4 score , this might not be good but we have to do it though
-def bleu_smoothing(bleu_4, bleu_result):
-    if bleu_4 == 0:
-        for precision in reversed(bleu_result['precisions']):
-            if precision > 0:
-                return precision
-        return 0.1
-    else:
-        return bleu_4
-
-def load_faiss_index_and_document_store(json_file_path, faiss_index_path):
-    # Load your FAISS index
-    index = faiss.read_index(faiss_index_path)
-
-    # Load the document metadata (e.g., original texts or chunk info)
-    with open(json_file_path, 'r', encoding='utf-8') as json_file:
-        document_store = json.load(json_file)
-    
-    return index, document_store
-
-def encode_query(query):
-    query_embedding = model.encode([query])
-    return query_embedding
-
-def search_faiss_index(query_embedding, index, top_k=5):
-    # Perform the search on FAISS index
-    D, I = index.search(query_embedding, top_k)
-    return I  # Return the indices of the top chunks
-
-def get_top_chunks(indices, document_store):
-    top_chunks = []
-    for idx in indices[0]:
-        # Assuming document_store contains the relevant chunk text and metadata
-        chunk_info = {
-            'title': document_store[idx]['title'],
-            'doc_id': document_store[idx]['doc_id'],
-            'chunk': document_store[idx]['chunk'],
-            'embedding': document_store[idx]['embedding']
-        }
-        top_chunks.append(chunk_info)
-    return top_chunks
-
-def ask_question_and_retrieve_chunks(question, index, document_store, top_k):
-    query_embedding = encode_query(question)
-    indices = search_faiss_index(query_embedding, index, top_k)
-    top_chunks = get_top_chunks(indices, document_store)
-    return top_chunks
-
-def generate_short_answer_from_chunks(question, chunks):
-    # Create a prompt by concatenating the chunks
-    chunk_text = " ".join([chunk['chunk'] for chunk in chunks])
-    prompt = f"Based on the following information, answer the question in less than 100 tokens:\n\n{chunk_text}\n\nQuestion: {question}"
-    print(prompt)
-    # Send the prompt to the API
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",  # You can use "gpt-4" if you have access to that model
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=100  # Limit the response to 100 tokens
-    )
-
-    # Extract the response
-    answer = response['choices'][0]['message']['content'].strip()
-    return answer
-
-def load_data(json_file_path):
-    # Load the JSON data from the file
-    with open(json_file_path, 'r', encoding='utf-8') as json_file:
-        documents = json.load(json_file)
-    return documents
-
-def load_json_folder(folder_path):
-    # Load all JSON files from the specified folder
-    json_files = []
-    for file_name in os.listdir(folder_path):
-        if file_name.endswith('.json'):
-            with open(os.path.join(folder_path, file_name), 'r', encoding='utf-8') as json_file:
-                json_data = json.load(json_file)
-                json_files.append(json_data)
-    return json_files
 
 # -----------------------------------OPEN AI TESTING-----------------------------------
 def test_openai_api():
@@ -185,211 +102,152 @@ def test_openai_api():
     except Exception as e:
         print(f"An error occurred: {e}")
 
-def squad_prompt_and_answer(top_chunks, question, answer_choices):
+def qasper_prompt_and_answer(top_chunks, question):
     try:
-        # Combine chunks into a single, clearly separated context for the GPT prompt
+        # First Turn: Generate a longer, relevant answer based on the context
         combined_chunks = "\n\n".join([f"Context {i+1}: {chunk['chunk']}" for i, chunk in enumerate(top_chunks)])
-        
-        # Construct a prompt with the question, distinct contexts, and answer choices
-        prompt = f"Question: {question}\n\n"
-        prompt += f"{combined_chunks}\n\n"
-        prompt += "Answer choices:\n"
 
-        # List each answer choice clearly
-        for i, choice in enumerate(answer_choices):
-            prompt += f"{i+1}. {choice}\n"
-
-        # Clear instructions to return only a single number
-        prompt += (
-            "\nBased on the question and the contexts provided, select the most appropriate answer. "
-            "Please respond with **only** the number corresponding to the correct answer choice (1, 2, 3, or 4), "
-            "with no additional text."
+        first_turn_prompt = f"Question: {question}\n\n"
+        first_turn_prompt += f"{combined_chunks}\n\n"
+        first_turn_prompt += (
+            "Based on the provided contexts, generate a detailed response explaining the relevant information to "
+            "answer the question."
         )
-    
-        chat_completion = client.chat.completions.create(
+
+        # First turn: Retrieve longer, detailed answer
+        first_turn_completion = client.chat.completions.create(
             messages=[
                 {
                     "role": "user",
-                    "content": prompt,
+                    "content": first_turn_prompt,
                 }
             ],
             model="gpt-4o-mini",
-            max_tokens=10,
-            temperature=0.2
+            max_tokens=500, 
+            temperature=0.0
         )
 
-        # Extract the response and token u  sage
-        output = chat_completion.choices[0].message.content
-        # Use regular expression to find the first number in the output
-        # match = re.search(r'\b[1-4]\b', output)  # Only match numbers 1 to 4
+        # Extract the longer generated answer from the first turn
+        long_answer = first_turn_completion.choices[0].message.content
 
-        # if match:
-        #     # If a valid number is found, convert it to an integer
-        #     result = int(match.group(0))
-        # else:
-        #     # If no valid number is found, handle the case (log a warning or decide on further steps)
-        #     logging.warning(f"Invalid output received: {output}. Unable to extract a valid number.")
-        #     result = 1  # You can handle this case as needed, e.g., ask for a retry or handle it some other way
-
-        total_tokens = chat_completion.usage.total_tokens
-        prompt_tokens = chat_completion.usage.prompt_tokens
-        completion_tokens = chat_completion.usage.completion_tokens
-
-        cost_per_1M_prompt_tokens = 0.150  # $ per 1M input tokens
-        cost_per_1M_completion_tokens = 0.600  # $ per 1M output tokens
-
-        prompt_cost = (prompt_tokens / 1_000_000) * cost_per_1M_prompt_tokens
-        completion_cost = (completion_tokens / 1_000_000) * cost_per_1M_completion_tokens
-        estimated_cost = prompt_cost + completion_cost
-        print(f"API reuslt: {output}")
-        logging.info(f"API Prompt: {prompt}")
-        logging.info(f"Estimate cost of ${estimated_cost:.6f} total")
-        return output, estimated_cost
-    
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return -1
-    
 def narrativeqa_prompt_and_answer(top_chunks, question):
     try:
-        # Combine chunks into a single, clearly separated context for the GPT prompt
+        # First Turn: Generate a longer, relevant answer based on the context
         combined_chunks = "\n\n".join([f"Context {i+1}: {chunk['chunk']}" for i, chunk in enumerate(top_chunks)])
-        
-        # Update few-shot examples to reflect book and movie transcript style
-        few_shot_examples = """
+
+        first_turn_prompt = f"Question: {question}\n\n"
+        first_turn_prompt += f"{combined_chunks}\n\n"
+        first_turn_prompt += (
+            "Based on the provided contexts, generate a detailed response explaining the relevant information to "
+            "answer the question."
+        )
+
+        # First turn: Retrieve longer, detailed answer
+        first_turn_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": first_turn_prompt,
+                }
+            ],
+            model="gpt-4o-mini",
+            max_tokens=500, 
+            temperature=0.0
+        )
+
+        # Extract the longer generated answer from the first turn
+        long_answer = first_turn_completion.choices[0].message.content
+
+        # Second Turn: Refine the long answer using few-shot examples and include the question again
+        few_shot_examples = f"""
         Example 1:
         Question: Who is the protagonist?
-        Context 1: In the novel, Captain Ahab is the one leading the voyage to hunt the great white whale. He is obsessed with the whale, which he names Moby Dick.
-        Context 2: Ishmael narrates the journey, but it is Ahab who drives the plot with his obsession.
-        Answer: Captain Ahab
+        Long Answer: In the novel, Captain Ahab is the one leading the voyage to hunt the great white whale. He is obsessed with the whale, which he names Moby Dick. Ishmael narrates the journey, but it is Ahab who drives the plot with his obsession.
+        Concise Answer: Captain Ahab
 
         Example 2:
         Question: What happens to Frodo at the end of 'The Lord of the Rings'?
-        Context 1: Frodo returns to the Shire after destroying the One Ring but feels out of place in his old life.
-        Context 2: Eventually, Frodo leaves Middle-earth with Gandalf and the Elves to find peace across the sea.
-        Answer: Frodo leaves Middle-earth with Gandalf and the Elves
+        Long Answer: Frodo returns to the Shire after destroying the One Ring but feels out of place in his old life. Eventually, Frodo leaves Middle-earth with Gandalf and the Elves to find peace across the sea.
+        Concise Answer: Frodo leaves Middle-earth with Gandalf and the Elves
 
         Example 3:
         Question: What is Neo's role in 'The Matrix'?
-        Context 1: Neo, played by Keanu Reeves, discovers he is "The One" who can manipulate the Matrix. He leads the fight against the machines that control humanity.
-        Context 2: The Oracle informs Neo of his potential to bring about the end of the war between humans and machines.
-        Answer: Neo is "The One" who leads the fight against the machines
+        Long Answer: Neo, played by Keanu Reeves, discovers he is "The One" who can manipulate the Matrix. He leads the fight against the machines that control humanity. The Oracle informs Neo of his potential to bring about the end of the war between humans and machines.
+        Concise Answer: Neo is "The One" who leads the fight against the machines
 
-        Example 3:
+        Example 4:
         Question: How many siblings does Katniss Everdeen have in 'The Hunger Games'?
-        Context 1: Katniss takes care of her younger sister, Primrose, after their father's death.
-        Context 2: She is extremely protective of her sister, Prim.
-        Answer: 1.
+        Long Answer: Katniss takes care of her younger sister, Primrose, after their father's death. She is extremely protective of her sister, Prim.
+        Concise Answer: 1
+
+        Example 5:
+        Question: Who is Harry Potter's best friend?
+        Long Answer: Throughout the series, Harry's best friend is Ron Weasley. They meet during their first year at Hogwarts and share many adventures together. Ron is always by Harry's side, and their bond strengthens over time.
+        Concise Answer: Ron Weasley
+
+        Example 6:
+        Question: What is the name of the ship in 'Star Trek'?
+        Long Answer: The main ship in the Star Trek series is the USS Enterprise. It is a starship that explores space, led by Captain Kirk and his crew. The Enterprise is well-known for its mission to explore new worlds.
+        Concise Answer: USS Enterprise
         """
 
-        # Construct the prompt with the question and combined contexts
-        prompt = f"Question: {question}\n\n"
-        prompt += f"{combined_chunks}\n\n"
-        prompt += f"{few_shot_examples}\n\n"
-        prompt += (
-            "\nBased on the provided contexts, generate a concise and accurate answer. Focus on the most relevant "
-            "information in the narrative or dialogue provided. Avoid unnecessary modifiers or ambiguous information. Answer in a single sentence or two. If the question asks for a "
-            "number, provide the number only. If the question asks for a specific person or object, provide only the name."
+        second_turn_prompt = f"Question: {question}\n\n"
+        second_turn_prompt += f"Long Answer: {long_answer}\n\n"
+        second_turn_prompt += "Below are a few examples that show how to generate concise answers based on detailed long answers. Use these examples to help guide your final response."
+        second_turn_prompt += f"{few_shot_examples}\n\n"
+        second_turn_prompt += (
+            "Please review the long answer and generate a concise and accurate final answer that is relevant to the question. "
+            "Answer in a single sentence or two."
         )
-    
-        chat_completion = client.chat.completions.create(
+
+        # Second turn: Refine the answer into the final response
+        second_turn_completion = client.chat.completions.create(
             messages=[
                 {
                     "role": "user",
-                    "content": prompt,
+                    "content": second_turn_prompt,
                 }
             ],
             model="gpt-4o-mini",
-            max_tokens=50,  
-            temperature=0.1, 
+            max_tokens=50,
+            temperature=0.1,
         )
 
-        # Extract the response and token usage
-        output = chat_completion.choices[0].message.content
+        # Extract the final refined answer from the second turn
+        final_output = second_turn_completion.choices[0].message.content
 
-        total_tokens = chat_completion.usage.total_tokens
-        prompt_tokens = chat_completion.usage.prompt_tokens
-        completion_tokens = chat_completion.usage.completion_tokens
+        # Calculate cost estimation
+        total_tokens_first = first_turn_completion.usage.total_tokens
+        total_tokens_second = second_turn_completion.usage.total_tokens
+        
+        prompt_tokens_first = first_turn_completion.usage.prompt_tokens
+        prompt_tokens_second = second_turn_completion.usage.prompt_tokens
+        
+        completion_tokens_first = first_turn_completion.usage.completion_tokens
+        completion_tokens_second = second_turn_completion.usage.completion_tokens
 
         cost_per_1M_prompt_tokens = 0.150  # $ per 1M input tokens
         cost_per_1M_completion_tokens = 0.600  # $ per 1M output tokens
 
-        prompt_cost = (prompt_tokens / 1_000_000) * cost_per_1M_prompt_tokens
-        completion_cost = (completion_tokens / 1_000_000) * cost_per_1M_completion_tokens
-        estimated_cost = prompt_cost + completion_cost
-        print(f"API result: {output}")
-        logging.info(f"API Prompt: {prompt}")
-        logging.info(f"Estimate cost of ${estimated_cost:.6f} total")
-        return output, estimated_cost
-    
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return -1
-
-# def quality_prompt_and_answer(top_chunks, question, answer_choices):
-#     try:
-#         # Combine chunks into a single, clearly separated context for the GPT prompt
-#         combined_chunks = "\n\n".join([f"Context {i+1}: {chunk['chunk']}" for i, chunk in enumerate(top_chunks)])
+        # Calculating costs for each turn
+        prompt_cost_first = (prompt_tokens_first / 1_000_000) * cost_per_1M_prompt_tokens
+        completion_cost_first = (completion_tokens_first / 1_000_000) * cost_per_1M_completion_tokens
         
-#         # Construct a prompt with the question, distinct contexts, and answer choices
-#         prompt = f"Question: {question}\n\n"
-#         prompt += f"{combined_chunks}\n\n"
-#         prompt += "Answer choices:\n"
+        prompt_cost_second = (prompt_tokens_second / 1_000_000) * cost_per_1M_prompt_tokens
+        completion_cost_second = (completion_tokens_second / 1_000_000) * cost_per_1M_completion_tokens
+        
+        # Total estimated cost
+        estimated_cost = prompt_cost_first + completion_cost_first + prompt_cost_second + completion_cost_second
 
-#         # List each answer choice clearly
-#         for i, choice in enumerate(answer_choices):
-#             prompt += f"{i+1}. {choice}\n"
+        logging.info(f"First Turn Prompt: {first_turn_prompt}")
+        logging.info(f"Second Turn Prompt: {second_turn_prompt}")
+        logging.info(f"Estimated cost: ${estimated_cost:.6f} total")
 
-#         # Clear instructions to return only a single number
-#         prompt += (
-#             "\nBased on the question and the contexts provided, select the most appropriate answer. "
-#             "Please respond with **only** the number corresponding to the correct answer choice (1, 2, 3, or 4), "
-#             "with no additional text."
-#         )
-    
-#         chat_completion = client.chat.completions.create(
-#             messages=[
-#                 {
-#                     "role": "user",
-#                     "content": prompt,
-#                 }
-#             ],
-#             model="gpt-4o-mini",
-#             max_tokens=10,
-#             temperature=0.0
-#         )
+        return final_output, estimated_cost
 
-#         # Extract the response and token u  sage
-#         output = chat_completion.choices[0].message.content
-#         # Use regular expression to find the first number in the output
-#         match = re.search(r'\b[1-4]\b', output)  # Only match numbers 1 to 4
-
-#         if match:
-#             # If a valid number is found, convert it to an integer
-#             result = int(match.group(0))
-#         else:
-#             # If no valid number is found, handle the case (log a warning or decide on further steps)
-#             logging.warning(f"Invalid output received: {output}. Unable to extract a valid number.")
-#             result = 1  # You can handle this case as needed, e.g., ask for a retry or handle it some other way
-
-#         total_tokens = chat_completion.usage.total_tokens
-#         prompt_tokens = chat_completion.usage.prompt_tokens
-#         completion_tokens = chat_completion.usage.completion_tokens
-
-#         cost_per_1M_prompt_tokens = 0.150  # $ per 1M input tokens
-#         cost_per_1M_completion_tokens = 0.600  # $ per 1M output tokens
-
-#         prompt_cost = (prompt_tokens / 1_000_000) * cost_per_1M_prompt_tokens
-#         completion_cost = (completion_tokens / 1_000_000) * cost_per_1M_completion_tokens
-#         estimated_cost = prompt_cost + completion_cost
-#         print(f"API reuslt: {result}")
-#         logging.info(f"API Prompt: {prompt}")
-#         logging.info(f"Estimate cost of ${estimated_cost:.6f} total")
-#         return result, estimated_cost
-
-#     except Exception as e:
-#         print(f"An error occurred: {e}")
-#         return -1
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+        return -1
 
 def quality_prompt_and_answer(top_chunks, question, answer_choices):
     try:
@@ -480,9 +338,7 @@ def quality_prompt_and_answer(top_chunks, question, answer_choices):
         return -1
 
 # -----------------------------------MAIN FUNTIONS-----------------------------------
-def squad_testing(chunk_type='256'):
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
-    original_documents = load_json_folder(folder_path=f'data/{args.dataset}/individual_documents')
+def qasper_testing(chunk_type='256'):
     return
 
 def narrativeqa_testing(chunk_type='256'):
@@ -585,8 +441,8 @@ def quality_testing(chunk_type='256'):
 # -----------------------------------MAIN-----------------------------------
 def main(args):
     logging.basicConfig(filename=f'{args.chunk_type}_{args.dataset}_experiment.txt', level=logging.INFO)
-    if args.dataset == 'squad':
-        squad_testing(chunk_type=args.chunk_type)
+    if args.dataset == 'qasper':
+        qasper_testing(chunk_type=args.chunk_type)
     elif args.dataset == 'narrativeqa':
         narrativeqa_testing(chunk_type=args.chunk_type)
     elif args.dataset == 'quality':
@@ -596,11 +452,11 @@ def main(args):
     # elif args.dataset == 'qasper':
     #     create_concantenated_documents_qasper_json(num_files=args.num_files)
     else:
-        raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'squad' or 'narrativeqa' or 'quality'.")
+        raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'qasper' or 'narrativeqa' or 'quality'.")
 
 if __name__ == '__main__':
     parser = ArgumentParser()
-    parser.add_argument('--dataset', help='whenever it is squad or narrative_qa',  required=True, type=str, default="squad")
+    parser.add_argument('--dataset', help='whenever it is squad or narrative_qa',  required=True, type=str, default="qasper")
     parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus', type=str, default='256')
     parser.add_argument('--top_k', help='Top_k chunk to retrieve', type=int, default=5)
     args = parser.parse_args() 
