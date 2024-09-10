@@ -19,28 +19,11 @@ import logging
 model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
 
-
-# def chunk_text_by_tokens(text, chunk_size, tokenizer):
-#     """
-#     This function chunks the text into chunks of `chunk_size` tokens.
-#     """
-#     tokens = tokenizer(text, return_tensors='pt', truncation=False)['input_ids'][0]
-#     chunks = []
-#     for i in range(0, len(tokens), chunk_size):
-#         chunk_tokens = tokens[i:i+chunk_size]
-#         chunk_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-#         chunks.append(chunk_text)
-#     print(len(chunks))
-#     return chunks
-
 def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=4000):
-    """
-    This function chunks the text into smaller chunks of tokens after splitting the text into smaller
-    word-based chunks to avoid tokenizing the entire text at once.
-    """
     # First, split the text into smaller word chunks to avoid tokenizing large texts at once
     words = text.split()  # Split the text into words
     chunks = []
+    total_chunks = 0  # Track the total number of chunks
     
     # Iterate through the words and create smaller chunks of words
     for i in range(0, len(words), max_words_per_chunk):
@@ -57,47 +40,59 @@ def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=4000):
         # Further split tokens into model's max token length (chunk_size)
         for j in range(0, len(tokens), chunk_size):
             chunk_tokens = tokens[j:j + chunk_size]
-            chunk_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
-            chunks.append(chunk_text)
+            decoded_text = tokenizer.decode(chunk_tokens, skip_special_tokens=True)
+            chunks.append((decoded_text, len(chunk_tokens)))  # Return both text and token size as a tuple
+            total_chunks += 1
+            print(f"Chunk {total_chunks}: {len(chunk_tokens)} tokens.")
+            logging.info(f"Chunk {total_chunks}: {len(chunk_tokens)} tokens.")
     
     print(f"Number of token chunks: {len(chunks)}")
     return chunks
 
 
-def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None):
+def chunk_text_by_segment(text, seg_array, tokenizer, title=None, doc_id=None):
     # Load spaCy model for sentence segmentation
     nlp = spacy.load("en_core_web_sm")
     doc = nlp(text)
     sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
-
+    max_chunk_size = 8192
     chunks = []
     current_chunk = []
     total_chunks = 0  # Track the total number of chunks
 
-    logging.info(f"Processing {title}.")
+    logging.info(f"Processing {title} with id {doc_id}.")
+    
     for i, is_segment_end in enumerate(seg_array):
-        # Check if the current segment index exceeds the number of sentences
         if i >= len(sentences):
             break
 
         # Tokenize the current sentence
-        sentence_tokens = tokenizer(sentences[i], return_tensors='pt', truncation=False)['input_ids'][0]
+        sentence_tokens = tokenizer(sentences[i], return_tensors='pt', truncation=False)['input_ids'][0].tolist()
         
-        # Add sentence tokens to the current chunk
-        current_chunk.extend(sentence_tokens.tolist())
-
-        # Check if the current chunk exceeds the token limit or if it's the end of a segment
-        if len(current_chunk) >= max_chunk_size or is_segment_end == 1:
-            # Store chunk with its size
+        # Check if adding the new sentence tokens would exceed max_chunk_size
+        if len(current_chunk) + len(sentence_tokens) > max_chunk_size:
+            # Store the current chunk
             chunk_size = len(current_chunk)
             chunks.append((current_chunk, chunk_size))
             
-            # Log the chunk details
+            logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
+            if chunk_size > max_chunk_size:
+                logging.info(f"Chunk size exceeds the limit: {chunk_size} tokens (Limit: {max_chunk_size}).")
+            total_chunks += 1
+            current_chunk = []  # Reset the chunk
+
+        # Add sentence tokens to the current chunk
+        current_chunk.extend(sentence_tokens)
+
+        # If it's the end of a segment, store the current chunk
+        if is_segment_end == 1:
+            chunk_size = len(current_chunk)
+            chunks.append((current_chunk, chunk_size))
             logging.info(f"Chunk {total_chunks + 1}: Size = {chunk_size} tokens.")
             total_chunks += 1
             current_chunk = []  # Reset the chunk
-    
-    # Add any remaining tokens
+
+    # Add any remaining tokens after the loop
     if current_chunk:
         chunk_size = len(current_chunk)
         chunks.append((current_chunk, chunk_size))
@@ -113,12 +108,15 @@ def chunk_text_by_segment(text, seg_array, max_chunk_size, tokenizer, title=None
     return chunk_texts_and_sizes
 
 def determine_chunk_size():
-    if args.chunk_type == '256':
-        model.max_seq_length = 256
-        return 256
+    if args.chunk_type == '1024':
+        model.max_seq_length = 1024
+        return 1024
     elif args.chunk_type == '512':
         model.max_seq_length = 512
         return 512
+    elif args.chunk_type == '2048':
+        model.max_seq_length = 2048
+        return 2048
     else:
         model.max_seq_length = 8192
         return 8192
@@ -131,6 +129,9 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     embeddings = []
     document_chunks = []
     chunk_size = determine_chunk_size()
+
+    total_chunk_size = 0  # Variable to track total size of all chunks
+    total_chunks_count = 0  # Variable to track total number of chunks
 
     # Iterate over each JSON file in the directory
     for json_filename in os.listdir(json_directory_path):
@@ -145,19 +146,20 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             doc_id = doc['id']
             title = doc['title']
             segmented_sentences = doc['segmented_sentences']
-            num_sentences = doc['num_sentences']
             # Split the text into smaller chunks that can be tokenized within model limits
-            if args.chunk_type == '256' or args.chunk_type == '512':
+            if args.chunk_type == '256' or args.chunk_type == '512' or args.chunk_type == '1024' or args.chunk_type == '2048':
                 text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             else:
-                text_chunks = chunk_text_by_segment(content, segmented_sentences, chunk_size, tokenizer, title)
+                text_chunks = chunk_text_by_segment(content, segmented_sentences, tokenizer, title, doc_id)
             # text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
             # text_chunks = split_text_into_segmented_chunks_at_word_level(num_sentences, content, max_chunk_size=chunk_size, tokenizer=tokenizer, segmented_sentences=segmented_sentences)
             print(f"Processing document {doc_id} with {len(text_chunks)} chunks")
             # Iterate through each chunk and its size
             chunk_id = 1
-            for chunk_text, chunk_size in text_chunks:
+            for chunk_text, c_size in text_chunks:
                 # Encode the chunk
+                total_chunk_size += c_size
+                total_chunks_count += 1
                 embedding = model.encode(chunk_text)
 
                 # Store the embedding and related information
@@ -166,7 +168,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
                     'doc_id': doc_id,
                     'title': title,
                     'chunk': chunk_text,
-                    'chunk_size': chunk_size,  # Include the size of the chunk
+                    'chunk_size': c_size,  # Include the size of the chunk
                     'embedding': embedding.tolist()  # Convert to list for JSON serialization
                 })
                 chunk_id += 1
@@ -189,13 +191,15 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     with open(output_ids_path, 'w', encoding='utf-8') as id_file:
         json.dump(document_chunks, id_file, ensure_ascii=False, indent=4)
 
+    logging.info(f"Total number of chunks for the dataset : {total_chunk_size}")
+    logging.info(f"Avarage chunk size is : {total_chunk_size/total_chunks_count}")
     print(f"FAISS index and document chunk information have been saved to {output_faiss_path} and {output_ids_path}")
 
 def main(args):
     if args.dataset:
         json_directory_path = f'data/{args.dataset}/individual_documents'
         # embedding_testing()
-        logging.basicConfig(filename=f'{args.dataset}_embedding.txt', level=logging.INFO)
+        logging.basicConfig(filename=f'{args.dataset}_{args.chunk_type}_embedding.txt', level=logging.INFO)
         create_segmendtaion_faiss_index_from_directory(json_directory_path=json_directory_path, 
                                      output_faiss_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index', 
                                      output_ids_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json')
