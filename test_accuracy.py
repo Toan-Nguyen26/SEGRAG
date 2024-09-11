@@ -26,7 +26,7 @@ from transformers import AutoTokenizer
 # Ensure you have the necessary NLTK data files
 # nltk.download('punkt')
 
-logger = utils.setup_logger(__name__, 'test_accuracy.log')
+logger  = None
 document = None
 json_file_path = None
 # Initialize the tokenizer
@@ -126,7 +126,12 @@ def main(args):
         
         if args.dataset:
             print('running on dataset: ', args.dataset)
-            json_file_path = f"RAG\data\{args.dataset}\individual_documents"
+            # We're handling 512 tokens on avr
+            if args.max_chunk_size == 1024:
+                json_file_path = f"RAG\data\{args.dataset}\individual_documents"
+            # We're handline 1024 on avarage
+            else:
+                json_file_path = f"RAG\data\{args.dataset}\individual_documents_2048"
             dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_data_path=json_file_path)
         elif args.wiki:
             if (args.wiki_folder):
@@ -139,14 +144,14 @@ def main(args):
         dl = DataLoader(dataset, batch_size=args.bs, collate_fn=collate_fn, shuffle=False)
 
 
-
+        logger = utils.setup_logger(__name__, f'{args.dataset}_{args.max_chunk_size}_test_accuracy.log')
         with tqdm(desc='Testing', total=len(dl)) as pbar:
             total_accurate = 0
             total_count = 0
             total_loss = 0
             acc =  accuracy.Accuracy()
 
-            max_chunk_size = 3000
+            max_chunk_size = args.max_chunk_size
             scaling_factor_base = 1.5
             # Add this line at the start of the main function to open a file for writing segment details
             segment_output_file = open(f'{args.dataset}_segment_output.txt', 'w')
@@ -161,12 +166,17 @@ def main(args):
                 targets_var = Variable(maybe_cuda(torch.cat(targets, 0), args.cuda), requires_grad=False)
                 batch_loss = 0
                 output_prob = softmax(output.data.cpu().numpy())
-                random_percentile = random.uniform(96, 98)
+                # use for narrativeqa
                 output_probability = output_prob[:, 1]
-                seg_threshold = np.percentile(output_probability, random_percentile)
+                if args.dataset == 'narrativeqa':
+                    random_percentile = random.uniform(95, 97)
+                    seg_threshold = np.percentile(output_probability, random_percentile)
+                else:
+                    # Use for qasper
+                    seg_threshold =  args.seg_threshold
                 # print(seg_threshold)
-                output_seg = output_probability > args.seg_threshold
-                # output_seg = output_probability > seg_threshold
+                # output_seg = output_probability > args.seg_threshold
+                output_seg = output_probability > seg_threshold
                 target_seg = targets_var.data.cpu().numpy()
                 batch_accurate = (output_seg == target_seg).sum()
                 total_accurate += batch_accurate
@@ -278,4 +288,6 @@ if __name__ == '__main__':
     parser.add_argument('--is_json', help='Are we loading a json_file for RAG', type=bool, default=False)
     parser.add_argument('--min_range', help='Min percentile', type=bool, default=95)
     parser.add_argument('--max_range', help='Max percentile', type=bool, default=98)
+    parser.add_argument('--max_chunk_size', help='Max chunk size', type=int, default=1024)
+    parser.add_argument('--scaling_factor_base', help='Scaling factor base', type=float, default=1.2)
     main(parser.parse_args())

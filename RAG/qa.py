@@ -1,6 +1,5 @@
 from argparse import ArgumentParser
-import faiss
-import json
+import openai
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -21,6 +20,21 @@ client = OpenAI(
     # This is the default and can be omitted
     api_key=os.environ.get("OPENAI_API_KEY"),
 )
+def search_specific_document(doc_id, document_store, faiss_index, top_k=5):
+    # Find the embeddings for the specified document in document_store
+    doc_embeddings = [doc['embedding'] for doc in document_store if doc['doc_id'] == doc_id]
+
+    if not doc_embeddings:
+        raise ValueError(f"No document found with doc_id: {doc_id}")
+
+    # Convert the list of embeddings into a numpy array (Faiss expects this format)
+    doc_embeddings_np = np.array(doc_embeddings)
+
+    # Perform the search on Faiss with the document embeddings
+    # D: distances, I: indices
+    D, I = faiss_index.search(doc_embeddings_np, top_k)
+
+    return I  
 
 # -----------------------------------OPEN AI TESTING-----------------------------------
 def test_openai_api():
@@ -129,6 +143,97 @@ def qasper_prompt_and_answer(top_chunks, question):
 
         # Extract the longer generated answer from the first turn
         long_answer = first_turn_completion.choices[0].message.content
+
+        # Second Turn: Refine the long answer using few-shot examples and include the question again
+        few_shot_examples = f"""
+        Example 1:
+        Question: How did the select the 300 Reddit communities for comparison?
+        Long Answer: Our full dataset consists of all subreddits on Reddit from January 2013 to December 2014, for which there are at least 500 words in the vocabulary used to estimate our measures, in at least 4 months of the subreddit's history. We compute our measures over the comments written by users in a community in time windows of months, for each sufficiently active month, and manually remove communities where the bulk of the contributions are in a foreign language. This results in 283 communities ( INLINEFORM0 ), for a total of 4,872 community-months ( INLINEFORM1 ).
+        Concise Answer: They selected all the subreddits from January 2013 to December 2014 with at least 500 words in the vocabulary and at least 4 months of the subreddit's history. They also removed communities with the bulk of the contributions are in foreign language
+
+        Example 2:
+        Question: What is the average number of turns per dialog?
+        Long Answer:Multiple turns: The average number of utterances per dialog is about 23 which ensures context-rich language behaviors.
+        Concise Answer: The average number of utterances per dialog is about 23
+
+        Example 3:
+        Question: What baseline models are offered?
+        Long Answer: LSTM: We consider LSTM models BIBREF27 with and without attention BIBREF28 and use the tensor2tensor BIBREF29 framework for the LSTM baselines. We use a two-layer LSTM network for both the encoder and the decoder with 128 dimensional hidden vectors.
+        Concise Answer: LSTM models BIBREF27 with and without attention BIBREF28
+
+        Example 4:
+        Question: Are agglutinative languages used in the prediction of both prefixing and suffixing languages?
+        Long Answer: Since English and Spanish are both Indo-European languages, and, thus, relatively similar, we further add a third, unrelated target language. We choose Zulu (ZUL), a Bantoid language. In contrast to the first two, it is strongly prefixing.
+        Concise Answer: true
+
+        Example 5:
+        Question: How much is the BLEU score??
+        Long Answer: FLOAT SELECTED: Table 1: BLEU scores and computation times with varyingK and sequence length compared to baseline models with and without attention.
+        Concise Answer: Ranges from 44.22 to 100.00 depending on K and the sequence length
+
+        Example 6:
+        Question: Do the authors report performance of conditional bert on tasks without data augmentation??
+        Long Answer: Table 2 lists the accuracies of the all methods on two classifier architectures. The results show that, for various datasets on different classifier architectures, our conditional BERT contextual augmentation improves the model performances most. BERT can also augments sentences to some extent, but not as much as conditional BERT does. For we masked words randomly, the masked words may be label-sensitive or label-insensitive. If label-insensitive words are masked, words predicted through BERT may not be compatible with original labels. The improvement over all benchmark datasets also shows that conditional BERT is a general augmentation method for multi-labels sentence classification tasks.
+        Concise Answer: true
+        """
+
+        second_turn_prompt = f"Question: {question}\n\n"
+        second_turn_prompt += f"Long Answer: {long_answer}\n\n"
+        second_turn_prompt += "Below are a few examples that show how to generate concise answers based on detailed long answers. Use these examples to help guide your final response."
+        second_turn_prompt += f"{few_shot_examples}\n\n"
+        second_turn_prompt += (
+            "Please review the long answer and generate a concise and accurate final answer that is relevant to the question. "
+            "Answer in a single sentence or two."
+        )
+
+        # Second turn: Refine the answer into the final response
+        second_turn_completion = client.chat.completions.create(
+            messages=[
+                {
+                    "role": "user",
+                    "content": second_turn_prompt,
+                }
+            ],
+            model="gpt-4o-mini",
+            max_tokens=50,
+            temperature=0.1,
+        )
+
+        # Extract the final refined answer from the second turn
+        final_output = second_turn_completion.choices[0].message.content
+
+        # Calculate cost estimation
+        total_tokens_first = first_turn_completion.usage.total_tokens
+        total_tokens_second = second_turn_completion.usage.total_tokens
+        
+        prompt_tokens_first = first_turn_completion.usage.prompt_tokens
+        prompt_tokens_second = second_turn_completion.usage.prompt_tokens
+        
+        completion_tokens_first = first_turn_completion.usage.completion_tokens
+        completion_tokens_second = second_turn_completion.usage.completion_tokens
+
+        cost_per_1M_prompt_tokens = 0.150  # $ per 1M input tokens
+        cost_per_1M_completion_tokens = 0.600  # $ per 1M output tokens
+
+        # Calculating costs for each turn
+        prompt_cost_first = (prompt_tokens_first / 1_000_000) * cost_per_1M_prompt_tokens
+        completion_cost_first = (completion_tokens_first / 1_000_000) * cost_per_1M_completion_tokens
+        
+        prompt_cost_second = (prompt_tokens_second / 1_000_000) * cost_per_1M_prompt_tokens
+        completion_cost_second = (completion_tokens_second / 1_000_000) * cost_per_1M_completion_tokens
+        
+        # Total estimated cost
+        estimated_cost = prompt_cost_first + completion_cost_first + prompt_cost_second + completion_cost_second
+
+        logging.info(f"First Turn Prompt: {first_turn_prompt}")
+        logging.info(f"Second Turn Prompt: {second_turn_prompt}")
+        logging.info(f"Estimated cost: ${estimated_cost:.6f} total")
+
+        return final_output, estimated_cost
+
+    except Exception as e:
+        logging.error(f"An error occurred: {e}")
+        return -1
 
 def narrativeqa_prompt_and_answer(top_chunks, question):
     try:
@@ -360,11 +465,11 @@ def narrativeqa_testing(chunk_type='256'):
         for qas in doc['qas']:
             question = qas['question']
             golden_answers = qas['answers']
-            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
+            # top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
+            indicies = search_specific_document(doc_id=doc['doc_id'], document_store=document_store, faiss_index=index, top_k=args.top_k)
+            top_chunks = get_top_chunks(indicies, document_store)
             chatbot_answer, estimated_cost = narrativeqa_prompt_and_answer(top_chunks, question)
             total_cost += estimated_cost
-            print(golden_answers)
-            print(chatbot_answer)
             rouge_result = rouge_metric.compute(predictions=[chatbot_answer], references=[golden_answers])
             
             predictions = [chatbot_answer]  # Pass raw strings, not tokenized
