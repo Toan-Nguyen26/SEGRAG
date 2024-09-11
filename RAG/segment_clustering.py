@@ -2,6 +2,7 @@ from argparse import ArgumentParser
 import json
 import numpy as np
 import os
+from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 from cluster.cluster_helper_functions import group_chunks_by_doc_and_chunk_id, write_json_to_file, determine_average_threshold, determine_percentile_threshold, hard_code_graph, bron_kerbosch, bron_kerbosch_with_pivot
 import logging
@@ -9,7 +10,7 @@ import faiss
 
 logging.basicConfig(filename='segment_clustering.log', level=logging.INFO, format='%(message)s')
 # =============================MAIN FUNCTIONS=============================== #
-
+model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 final_embeddings = []
 # Initialize a list to hold the merged results
 merged_results = []
@@ -165,7 +166,8 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                     if chunk_text:  # Make sure there's data to save
                         # Save the current segment
                         concatenated_chunk = " ".join(current_chunk)
-                        embedding = np.mean(current_embedding_list, axis=0)
+                        embedding = model.encode(concatenated_chunk)
+                        # embedding = np.mean(current_embedding_list, axis=0)
 
                         loaded_data.append({
                             'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
@@ -193,7 +195,8 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
             # Add the last segment if it hasn't been added yet
             if current_chunk and added_time > 1:
                 concatenated_chunk = " ".join(current_chunk)
-                embedding = np.mean(current_embedding_list, axis=0)
+                embedding = model.encode(concatenated_chunk)
+                # embedding = np.mean(current_embedding_list, axis=0)
                 loaded_data.append({
                     'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
                     'doc_id': id,
