@@ -14,10 +14,36 @@ from langchain_community.vectorstores import FAISS
 from langchain_community.embeddings import GPT4AllEmbeddings
 from langchain.docstore.document import Document
 import spacy
+from segment_clustering import cluster_segment
 import logging
+import random
 
+# Generate a random number for the log file name
+random_number = random.randint(1000, 9999)
+
+# Set up logging with the random number in the file name
+logging.basicConfig(filename=f'{random_number}.txt', level=logging.INFO)
 model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
+def configure_logging(dataset_name, chunk_type):
+    # Create a directory for logs if it doesn't exist
+    log_directory = "logs"
+    os.makedirs(log_directory, exist_ok=True)
+
+    # Create a dynamic log file name based on the dataset name and chunk type
+    log_filename = os.path.join(log_directory, f'{dataset_name}_{chunk_type}_embedding.log')
+
+    # Configure logging settings
+    logging.basicConfig(
+        filename=log_filename,
+        filemode='a',  # Append to existing log file
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        level=logging.INFO
+    )
+
+    # Log the dataset name and chunk type to distinguish the log session
+    logging.info(f"Starting logging for dataset: {dataset_name}, chunk type: {chunk_type}")
+
 
 def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=4000):
     # First, split the text into smaller word chunks to avoid tokenizing large texts at once
@@ -177,6 +203,22 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
                 chunk_id += 1
                 embeddings.append(embedding)
 
+     # Save the document chunks with IDs and embeddings
+    
+    # Save the document chunks with IDs and embeddings
+    os.makedirs(os.path.dirname(output_ids_path), exist_ok=True)
+    with open(output_ids_path, 'w', encoding='utf-8') as id_file:
+        json.dump(document_chunks, id_file, ensure_ascii=False, indent=4)
+    # Should have a step here to determine that we're segment_cluster or not here
+
+    if args.is_cluster == True:
+        
+        with open(output_ids_path, 'r', encoding='utf-8') as id_file:
+            loaded_data = json.load(id_file)
+        loaded_data, embeddings = cluster_segment(loaded_data, embeddings, args.max_file_size)
+        with open(output_ids_path, 'w', encoding='utf-8') as id_file:
+            json.dump(loaded_data, id_file, ensure_ascii=False, indent=4)
+
     # Convert embeddings to a numpy array
     embeddings = np.array(embeddings)
 
@@ -189,13 +231,11 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     os.makedirs(os.path.dirname(output_faiss_path), exist_ok=True)
     faiss.write_index(index, output_faiss_path)
 
-    # Save the document chunks with IDs and embeddings
-    os.makedirs(os.path.dirname(output_ids_path), exist_ok=True)
-    with open(output_ids_path, 'w', encoding='utf-8') as id_file:
-        json.dump(document_chunks, id_file, ensure_ascii=False, indent=4)
 
-    logging.info(f"Total number of chunks for the dataset : {total_chunk_size}")
+    logging.info(f"Total number of chunks for the dataset : {len(embeddings)}")
     logging.info(f"Avarage chunk size is : {total_chunk_size/total_chunks_count}")
+    print(f"Total number of chunks for the dataset : {len(embeddings)}")
+    print(f"Avarage chunk size is : {total_chunk_size/total_chunks_count}")
     print(f"FAISS index and document chunk information have been saved to {output_faiss_path} and {output_ids_path}")
 
 def main(args):
@@ -217,6 +257,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa',  required=True, type=str, default="squad")
     parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus', type=str, default='256')
     parser.add_argument('--max_file_size', help='Output path for the embeddings', type=int, default=0)
+    parser.add_argument('--is_cluster', help='Enable clustering of segments', action='store_true')
     args = parser.parse_args() 
     main(args)
 
