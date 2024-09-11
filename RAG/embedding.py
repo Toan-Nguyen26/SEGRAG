@@ -55,7 +55,7 @@ def chunk_text_by_segment(text, seg_array, tokenizer, title=None, doc_id=None):
     nlp = spacy.load("en_core_web_sm")
     doc = nlp(text)
     sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
-    max_chunk_size = 8192
+    max_chunk_size = 4096
     chunks = []
     current_chunk = []
     total_chunks = 0  # Track the total number of chunks
@@ -114,12 +114,15 @@ def determine_chunk_size():
     elif args.chunk_type == '512':
         model.max_seq_length = 512
         return 512
+    elif args.chunk_type == '256':
+        model.max_seq_length = 256
+        return 256
     elif args.chunk_type == '2048':
         model.max_seq_length = 2048
         return 2048
     else:
-        model.max_seq_length = 8192
-        return 8192
+        model.max_seq_length = 4092
+        return 4092
     
 
 def create_segmendtaion_faiss_index_from_directory(json_directory_path, 
@@ -197,7 +200,10 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
 
 def main(args):
     if args.dataset:
-        json_directory_path = f'data/{args.dataset}/individual_documents'
+        if args.max_file_size != 0:
+            json_directory_path = f'data/{args.dataset}/individual_documents_2048'
+        else:
+            json_directory_path = f'data/{args.dataset}/individual_documents'
         # embedding_testing()
         logging.basicConfig(filename=f'{args.dataset}_{args.chunk_type}_embedding.txt', level=logging.INFO)
         create_segmendtaion_faiss_index_from_directory(json_directory_path=json_directory_path, 
@@ -210,6 +216,7 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa',  required=True, type=str, default="squad")
     parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus', type=str, default='256')
+    parser.add_argument('--max_file_size', help='Output path for the embeddings', type=int, default=0)
     args = parser.parse_args() 
     main(args)
 
