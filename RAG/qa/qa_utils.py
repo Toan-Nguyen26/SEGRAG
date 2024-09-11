@@ -3,9 +3,45 @@ import json
 import os
 import openai
 from sentence_transformers import SentenceTransformer
+import evaluate
 
+f1_metric = evaluate.load("f1") # type: ignore
 model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 # Smoothing function for BLEU-4 score , this might not be good but we have to do it though
+
+def compute_best_f1(chatbot_answer, golden_answers):
+    best_f1 = 0
+    for golden_answer in golden_answers:
+        # Tokenize both strings (you can use more sophisticated tokenizers if needed)
+        golden_answer = str(golden_answer)
+        chatbot_tokens = chatbot_answer.split()
+        golden_tokens = golden_answer.split()
+
+        # Create sets for both
+        chatbot_set = set(chatbot_tokens)
+        golden_set = set(golden_tokens)
+
+        # Compute true positives, false positives, false negatives
+        true_positives = len(chatbot_set & golden_set)
+        false_positives = len(chatbot_set - golden_set)
+        false_negatives = len(golden_set - chatbot_set)
+
+        # Compute precision and recall
+        precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+        recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+        
+        # Compute F1
+        if precision + recall > 0:
+            current_f1 = 2 * (precision * recall) / (precision + recall)
+        else:
+            current_f1 = 0
+
+        # Keep track of the highest F1 score
+        if current_f1 > best_f1:
+            best_f1 = current_f1
+    
+    print("Best F1 score:", best_f1)
+    return best_f1
 
 def bleu_smoothing(bleu_4, bleu_result):
     if bleu_4 == 0:

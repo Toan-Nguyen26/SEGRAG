@@ -25,6 +25,7 @@ def group_chunks_by_doc_and_chunk_id(documents):
             'chunk_size': chunk_size,
             'embedding': embedding
         }
+
         
     return grouped_data
 
