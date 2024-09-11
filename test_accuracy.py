@@ -66,7 +66,7 @@ def close_file(file_path, document):
     print(f"Saved the updated document to {file_path}")
     return
 
-def adjust_segment_for_length(output_prob, token_lengths, max_chunk_size=3000, threshold=0.4, scaling_factor_base=1.5):
+def adjust_segment_for_length(output_prob, token_lengths, max_chunk_size, threshold, scaling_factor_base):
 
     segment_size = sum(token_lengths)
     output_prob = np.array(output_prob)
@@ -87,7 +87,7 @@ def main(args):
 
     utils.read_config_file(args.config)
     utils.config.update(args.__dict__)
-
+    logger = utils.setup_logger(__name__, f'{args.dataset}_{args.max_chunk_size}_test_accuracy.log')
     logger.debug('Running with config %s', utils.config)
     print ('Running with threshold: ' + str(args.seg_threshold))
     preds_stats = utils.predictions_analysis()
@@ -144,7 +144,6 @@ def main(args):
         dl = DataLoader(dataset, batch_size=args.bs, collate_fn=collate_fn, shuffle=False)
 
 
-        logger = utils.setup_logger(__name__, f'{args.dataset}_{args.max_chunk_size}_test_accuracy.log')
         with tqdm(desc='Testing', total=len(dl)) as pbar:
             total_accurate = 0
             total_count = 0
@@ -152,7 +151,7 @@ def main(args):
             acc =  accuracy.Accuracy()
 
             max_chunk_size = args.max_chunk_size
-            scaling_factor_base = 1.5
+            scaling_factor_base = args.scaling_factor_base
             # Add this line at the start of the main function to open a file for writing segment details
             segment_output_file = open(f'{args.dataset}_segment_output.txt', 'w')
             
@@ -168,12 +167,11 @@ def main(args):
                 output_prob = softmax(output.data.cpu().numpy())
                 # use for narrativeqa
                 output_probability = output_prob[:, 1]
-                if args.dataset == 'narrativeqa':
-                    random_percentile = random.uniform(95, 97)
-                    seg_threshold = np.percentile(output_probability, random_percentile)
+                if args.dataset == 'qasper':
+                    seg_threshold =  args.seg_threshold
                 else:
                     # Use for qasper
-                    seg_threshold =  args.seg_threshold
+                    seg_threshold = np.percentile(output_probability, 96)
                 # print(seg_threshold)
                 # output_seg = output_probability > args.seg_threshold
                 output_seg = output_probability > seg_threshold

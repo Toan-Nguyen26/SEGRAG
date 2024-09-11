@@ -18,7 +18,7 @@ def create_relatedness_graph(embeddings, threshold):
     graph = {i + 1: set() for i in range(len(embeddings))}
     similarity_matrix = cosine_similarity(embeddings)
     threshold = determine_percentile_threshold(similarity_matrix)
-    print(threshold)
+    # print(threshold)
     for i in range(len(embeddings)):
         for j in range(i + 1, len(embeddings)):
             if similarity_matrix[i, j] > threshold:
@@ -110,10 +110,12 @@ def process_json_and_bron_kerbosch_with_text(grouped_data, embeddings, threshold
     return
     
 def process_json_with_merged_segments(grouped_data, threshold=0.5):
+    print(len(grouped_data.keys()))
     for doc_id, doc_data in grouped_data.items():
         embeddings = [doc_data[chunk]['embedding'] for chunk in doc_data]
         first_chunk_key = next(iter(doc_data))
         title = doc_data[first_chunk_key]["title"]
+        id = doc_data[first_chunk_key]["doc_id"]
         print("\n")
         print(f"Embedding document {doc_id} with {len(embeddings)} chunks")
         # If the document has only one chunk, no need to calculate similarities
@@ -122,7 +124,7 @@ def process_json_with_merged_segments(grouped_data, threshold=0.5):
             chunk_id = list(doc_data.keys())[0]  # Get the single chunk's ID            
             merged_results.append({
                 'chunk_id': doc_data[chunk_id]['chunk_id'],
-                'doc_id': doc_id,
+                'doc_id': id,
                 'title': title,
                 'chunk': doc_data[chunk_id]['chunk'],
                 'chunk_size': doc_data[chunk_id]['chunk_size'],
@@ -153,23 +155,26 @@ def process_json_with_merged_segments(grouped_data, threshold=0.5):
                 chunk_text = doc_data[chunk_id]['chunk']
                 chunk_length = doc_data[chunk_id]['chunk_size']
                 chunk_embedding = doc_data[chunk_id]['embedding']
+                # print(f"total_length: {total_length}, chunk_length: {chunk_length}")
+                # print(f" Embeding list: {current_embedding_list}")
                 
                 # If adding this chunk exceeds the 3000 token limit, save the current segment and start a new one
-                if total_length + chunk_length > 3000:
-                    # Save the current segment
-                    concatenated_chunk = " ".join(current_chunk)
-                    embedding = np.mean(current_embedding_list, axis=0).tolist()
-                    
-                    merged_results.append({
-                        'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
-                        'doc_id': doc_id,
-                        'title': title,
-                        'chunk': concatenated_chunk,
-                        'chunk_size': total_length,
-                        "embedding": embedding
-                    })
-                    new_chunk_id += 1
-                    final_embeddings.append(embedding)
+                if total_length + chunk_length > args.max_chunk_size:
+                    if current_chunk:  # Make sure there's data to save
+                        # Save the current segment
+                        concatenated_chunk = " ".join(current_chunk)
+                        embedding = np.mean(current_embedding_list, axis=0).tolist()
+
+                        merged_results.append({
+                            'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
+                            'doc_id': id,
+                            'title': title,
+                            'chunk': concatenated_chunk,
+                            'chunk_size': total_length,
+                            "embedding": embedding
+                        })
+                        new_chunk_id += 1
+                        final_embeddings.append(embedding)
                     
                     # Reset for the next segment
                     current_chunk = []
@@ -187,7 +192,7 @@ def process_json_with_merged_segments(grouped_data, threshold=0.5):
                 embedding = np.mean(current_embedding_list, axis=0).tolist()
                 merged_results.append({
                     'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
-                    'doc_id': doc_id,
+                    'doc_id': id,
                     'title': title,
                     'chunk': concatenated_chunk,
                     'chunk_size': total_length,
@@ -195,17 +200,18 @@ def process_json_with_merged_segments(grouped_data, threshold=0.5):
                 })
                 new_chunk_id += 1
                 final_embeddings.append(embedding)
-        return
+    return
 
 # Example usage
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument('--dataset', help='whether it is squad, narrative_qa, or quality', required=True, type=str, default="squad")
+    parser.add_argument('--max_chunk_size', help='whether it is squad, narrative_qa, or quality', required=True, type=int, default=1024)
     args = parser.parse_args()
-
+    logger = logging.basicConfig(filename=f'{args.dataset}_segment_clustering.log', level=logging.INFO, format='%(message)s')
     # Provide the path to your JSON file
     json_file_path = f'data/{args.dataset}/seg/seg.json'
-
+    
     # TEST json path
     # json_file_path = f'data/{args.dataset}/512/512.json'
 
@@ -220,10 +226,12 @@ if __name__ == "__main__":
 
     # Group chunks by document ID and chunk ID
     grouped_data = group_chunks_by_doc_and_chunk_id(data)
+    print(len(grouped_data))
     # Iterate over each document in the grouped data
-    for doc_id, doc_data in grouped_data.items():
-        # Extract embeddings and process each document with Bron-Kerbosch algorithm
-        process_json_with_merged_segments(grouped_data, merged_results)
+    # for doc_id, doc_data in grouped_data.items():
+    #     # Extract embeddings and process each document with Bron-Kerbosch algorithm
+    #     # print(grouped_data.)
+    process_json_with_merged_segments(grouped_data, merged_results)
 
     # Save the updated JSON back to a file
     with open(f'data/{args.dataset}/segclus/segclus.json', 'w', encoding='utf-8') as f:
@@ -237,6 +245,6 @@ if __name__ == "__main__":
     index.add(embeddings)  # Add the embeddings to the index
 
     faiss.write_index(index, output_faiss_path)
-
+    print(f"{len(final_embeddings)} chunks have been clustered and saved to {output_ids_path}")
     print(f"FAISS index and document chunk information have been saved to {output_faiss_path}")
 
