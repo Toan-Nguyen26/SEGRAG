@@ -37,8 +37,9 @@ def compute_best_f1(chatbot_answer, golden_answers):
             current_f1 = 0
 
         # Keep track of the highest F1 score
-        best_f1 += current_f1
-    
+        if current_f1 > best_f1:
+            best_f1 = current_f1
+
     print("Best F1 score:", best_f1)
     return best_f1
 

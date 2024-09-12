@@ -127,11 +127,11 @@ def main(args):
         if args.dataset:
             print('running on dataset: ', args.dataset)
             # We're handling 512 tokens on avr
-            if args.max_chunk_size == 1024:
-                json_file_path = f"RAG\data\{args.dataset}\individual_documents"
-            # We're handline 1024 on avarage
-            else:
-                json_file_path = f"RAG\data\{args.dataset}\individual_documents_2048"
+            # if args.max_chunk_size == 1024:
+            json_file_path = f"RAG\data_3072\{args.dataset}\individual_documents"
+            # # We're handline 1024 on avarage
+            # else:
+            #     json_file_path = f"RAG\data\{args.dataset}\individual_documents_2048"
             dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_data_path=json_file_path)
         elif args.wiki:
             if (args.wiki_folder):
@@ -168,10 +168,15 @@ def main(args):
                 # use for narrativeqa
                 output_probability = output_prob[:, 1]
                 if args.dataset == 'qasper':
+                    print('qasper')
                     seg_threshold =  args.seg_threshold
-                else:
+                elif args.dataset == 'narativeqa':
+                    print('narativeqa')
                     # Use for qasper
-                    seg_threshold = np.percentile(output_probability, 96)
+                    seg_threshold = np.percentile(output_probability, 97)
+                else:
+                    print("quality")
+                    seg_threshold = np.percentile(output_probability, 98)
                 # print(seg_threshold)
                 # output_seg = output_probability > args.seg_threshold
                 output_seg = output_probability > seg_threshold
