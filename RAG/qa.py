@@ -622,8 +622,8 @@ def quality_prompt_and_answer(top_chunks, question, answer_choices):
 
 # -----------------------------------MAIN FUNTIONS-----------------------------------
 def qasper_testing(chunk_type='256'):
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_2048/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
-    original_documents = load_json_folder(folder_path=f'data_2048/{args.dataset}/individual_documents_2048')
+    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
+    original_documents = load_json_folder(folder_path=f'data/{args.dataset}/individual_documents_2048')
 
     # To accumulate scores
     total_f1 = 0
