@@ -3,7 +3,8 @@ import openai
 from sentence_transformers import SentenceTransformer
 from openai import OpenAI
 from dotenv import load_dotenv
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, T5Tokenizer, T5ForConditionalGeneration
+import torch
 import numpy as np
 import os
 import logging
@@ -19,10 +20,20 @@ nltk.download('punkt_tab')
 model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
 
+model_name = "allenai/unifiedqa-t5-3b"
+unified_tokenizer = T5Tokenizer.from_pretrained(model_name)
+unified_model = T5ForConditionalGeneration.from_pretrained(model_name)
+
 client = OpenAI(
     # This is the default and can be omitted
     api_key=os.environ.get("OPENAI_API_KEY"),
 )
+
+def run_model(input_string, **generator_args):
+    input_ids = tokenizer.encode(input_string, return_tensors="pt")
+    res = model.generate(input_ids, **generator_args)
+    return tokenizer.batch_decode(res, skip_special_tokens=True)
+
 def search_specific_document(question, doc_id, document_store, faiss_index, top_k=5):
     # Find the embeddings for the specified document in document_store
     query_embedding = encode_query(question)
@@ -620,6 +631,27 @@ def quality_prompt_and_answer(top_chunks, question, answer_choices):
         logging.error(f"An error occurred: {e}")
         return -1
 
+def unified_qa_narrativeqa_prompt_and_answer(top_chunks, question):
+    try:
+        # Combine chunks into a single context
+        combined_chunks = "\n\n".join([f"Context {i+1}: {chunk['chunk']}" for i, chunk in enumerate(top_chunks)])
+
+        # Format the input as UnifiedQA expects: "question: [QUESTION] context: [CONTEXT]"
+        prompt = f" {question} \\n {combined_chunks}"
+        # Lowercase the prompt
+        prompt = prompt.lower()
+
+
+        # Decode the output tokens to get the final answer
+        answer = run_model(prompt)
+        print(f"Answer: {answer}")
+
+        return answer
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return -1
+
 # -----------------------------------MAIN FUNTIONS-----------------------------------
 def qasper_testing(chunk_type='256'):
     index, document_store = load_faiss_index_and_document_store(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
@@ -654,9 +686,9 @@ def qasper_testing(chunk_type='256'):
 
     # Log the final results
     print(f"For chunking type {chunk_type}:")  # Output the accuracy
-    print(f"Average f1: {avg_f1 + 15}")
+    print(f"Average f1: {avg_f1}")
     print(f"Total Cost: ${total_cost:.6f}")
-    logging.info(f"Average f1: {avg_f1 + 15}")
+    logging.info(f"Average f1: {avg_f1}")
     logging.info(f"Total Cost: ${total_cost:.6f}")
     return
 
@@ -685,8 +717,8 @@ def narrativeqa_testing(chunk_type='256'):
             top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
             # indicies = indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
             # top_chunks = get_top_chunks(indicies, document_store)
-            chatbot_answer, estimated_cost = narrativeqa_prompt_and_answer(top_chunks, question) # type: ignore
-            total_cost += estimated_cost
+            chatbot_answer, estimated_cost = unified_qa_narrativeqa_prompt_and_answer(top_chunks, question) # type: ignore
+            # total_cost += estimated_cost
             # Compute ROUGE
             rouge_result = rouge_metric.compute(predictions=[chatbot_answer], references=[golden_answers])
             total_rouge += rouge_result['rougeL']
