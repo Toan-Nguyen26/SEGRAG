@@ -7,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from cluster.cluster_helper_functions import group_chunks_by_doc_and_chunk_id, write_json_to_file, determine_average_threshold, determine_percentile_threshold, hard_code_graph, bron_kerbosch, bron_kerbosch_with_pivot
 import logging
 import faiss
+import spacy
 
 logging.basicConfig(filename='segment_clustering.log', level=logging.INFO, format='%(message)s')
 # =============================MAIN FUNCTIONS=============================== #
@@ -27,6 +28,59 @@ def create_relatedness_graph(embeddings, threshold):
                 graph[j + 1].add(i + 1)
     print(f"The graph is {graph}")
     return graph, set(graph.keys())
+
+def create_relatedness_graph(embeddings, k=1.0):
+    # Initialize graph
+    graph = {i + 1: set() for i in range(len(embeddings))}
+    
+    # Calculate cosine similarity matrix
+    similarity_matrix = cosine_similarity(embeddings)
+    
+    # Flatten similarity matrix (exclude diagonal) to calculate mean and std
+    upper_triangle_values = similarity_matrix[np.triu_indices(len(embeddings), k=1)]
+    
+    # Calculate mean and standard deviation
+    mean_similarity = np.mean(upper_triangle_values)
+    std_similarity = np.std(upper_triangle_values)
+    
+    # Set the initial threshold based on mean + k * std
+    initial_threshold = mean_similarity + k * std_similarity
+    print(f"Initial threshold: {initial_threshold}")
+    
+    # Function to calculate the edge density
+    def calculate_edge_density(graph, num_nodes):
+        num_edges = sum(len(neighbors) for neighbors in graph.values()) / 2  # Since the graph is undirected
+        max_edges = num_nodes * (num_nodes - 1) / 2
+        return num_edges / max_edges
+    
+    # Step 1: Construct graph using the initial threshold
+    for i in range(len(embeddings)):
+        for j in range(i + 1, len(embeddings)):
+            if similarity_matrix[i, j] > initial_threshold:
+                graph[i + 1].add(j + 1)
+                graph[j + 1].add(i + 1)
+    
+    # Step 2: Calculate initial edge density
+    current_density = calculate_edge_density(graph, len(embeddings))
+    print(f"Initial edge density: {current_density}")
+    
+    # Step 3: Apply edge density "softening"
+    # Soften the threshold based on edge density (reduce threshold by a factor based on density)
+    softened_threshold = initial_threshold * (1 - current_density)
+    print(f"Softened threshold: {softened_threshold}")
+    
+    # Reset graph and use the softened threshold
+    graph = {i + 1: set() for i in range(len(embeddings))}
+    
+    for i in range(len(embeddings)):
+        for j in range(i + 1, len(embeddings)):
+            if similarity_matrix[i, j] > softened_threshold:
+                graph[i + 1].add(j + 1)
+                graph[j + 1].add(i + 1)
+    
+    print(f"Final graph is {graph}")
+    return graph, set(graph.keys())
+
 
 def find_maximal_cliques_with_pivot(graph):
     cliques = []
@@ -98,6 +152,36 @@ def merge_segments(SG, cliques):
     print(f"Final segments: {new_SG}")
     return new_SG
 
+# def merge_single_sentence_segments(new_SG, cliques):
+#     final_SG = []
+#     i = 0
+
+#     while i < len(new_SG):
+#         sgi = new_SG[i]
+#         nlp = spacy.load("en_core_web_sm")
+#         doc = nlp(text)
+#         sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
+#         # merged = False
+#         # if i < len(new_SG) - 1:
+#         #     sgi1 = new_SG[i + 1]
+#         #     for clique in cliques:
+#         #         # Check if there's an intersection between the two segments and the clique
+#         #         if any(item in clique for item in sgi) and any(item in clique for item in sgi1):
+#         #             # Merge the two segments by combining and sorting them, avoiding duplicates
+#         #             merged_segment = sorted(set(sgi + sgi1))
+#         #             final_SG.append(merged_segment)  # Add the merged segment
+#         #             merged = True
+#         #             i += 2  # Skip the next segment as it has been merged
+#         #             break
+        
+#         # if not merged:
+#         #     final_SG.append(sgi) 
+#         #     i += 1
+
+#     print(f"Final segments: {final_SG}")
+#     return final_SG
+
+
 # Main function to process JSON input and run Bron-Kerbosch
 def process_json_and_bron_kerbosch_with_text(grouped_data, embeddings, threshold=0.5):
     # Run the existing Bron-Kerbosch process
@@ -144,13 +228,16 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         # Step 4: Merge segments into bigger segments
         merged_segments = merge_segments(initial_segments, maximal_cliques)
 
-        new_chunk_id = len(embeddings)+1  
+        # new_chunk_id = len(embeddings)+1  
+        new_chunk_id = 1
 
+        total_embeddings = []
+        total_data = []
         added_time = 0
         for segment in merged_segments:
             # print(segment)
-            if len(segment) == 1:
-                continue 
+            # if len(segment) == 1:
+            #     continue 
 
             current_chunk = []  # To hold concatenated text chunks
             current_embedding_list = []  # To hold embeddings for averaging
@@ -162,42 +249,42 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                 chunk_embedding = doc_data[chunk_id]['embedding']
                 
                 # If adding this chunk exceeds the 3000 token limit, save the current segment and start a new one
-                if total_length + chunk_length > max_chunk_size:
-                    if chunk_text:  # Make sure there's data to save
-                        # Save the current segment
-                        concatenated_chunk = " ".join(current_chunk)
-                        embedding = model.encode(concatenated_chunk)
-                        # embedding = np.mean(current_embedding_list, axis=0)
+                # if total_length + chunk_length > max_chunk_size:
+                #     if chunk_text:  # Make sure there's data to save
+                #         # Save the current segment
+                #         concatenated_chunk = " ".join(current_chunk)
+                #         embedding = model.encode(concatenated_chunk)
+                #         # embedding = np.mean(current_embedding_list, axis=0)
 
-                        loaded_data.append({
-                            'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
-                            'doc_id': id,
-                            'title': title,
-                            'chunk': concatenated_chunk,
-                            'chunk_size': total_length,
-                            "embedding": embedding.tolist()
-                        })
-                        new_chunk_id += 1
-                        list_embeddings.append(embedding)
+                #         loaded_data.append({
+                #             'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
+                #             'doc_id': id,
+                #             'title': title,
+                #             'chunk': concatenated_chunk,
+                #             'chunk_size': total_length,
+                #             "embedding": embedding.tolist()
+                #         })
+                #         new_chunk_id += 1
+                #         list_embeddings.append(embedding)
                     
-                    # Reset for the next segment
-                    current_chunk = []
-                    current_embedding_list = []
-                    total_length = 0
-                    added_time = 0
+                #     # Reset for the next segment
+                #     current_chunk = []
+                #     current_embedding_list = []
+                #     total_length = 0
+                #     added_time = 0
 
 
                 # Add the chunk to the current segment
                 current_chunk.append(chunk_text)
                 current_embedding_list.append(chunk_embedding)
                 total_length += chunk_length
-                added_time += 1
+                # added_time += 1
             # Add the last segment if it hasn't been added yet
-            if current_chunk and added_time > 1:
+            if current_chunk:
                 concatenated_chunk = " ".join(current_chunk)
                 embedding = model.encode(concatenated_chunk)
                 # embedding = np.mean(current_embedding_list, axis=0)
-                loaded_data.append({
+                total_data.append({
                     'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
                     'doc_id': id,
                     'title': title,
@@ -207,8 +294,8 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                 })
                 new_chunk_id += 1
                 added_time = 0
-                list_embeddings.append(embedding)
-    return loaded_data, list_embeddings
+                total_embeddings.append(embedding)
+    return total_data, total_embeddings # type: ignore
 
 def cluster_segment(loaded_data, embeddings, max_chunk_size):
     grouped_data = group_chunks_by_doc_and_chunk_id(loaded_data)
