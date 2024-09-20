@@ -21,7 +21,7 @@ from timeit import default_timer as timer
 import random
 from transformers import AutoTokenizer
 # import nltk
-# import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt
 
 # Ensure you have the necessary NLTK data files
 # nltk.download('punkt')
@@ -80,6 +80,45 @@ def adjust_segment_for_length(output_prob, token_lengths, max_chunk_size, thresh
 
     return adjusted_segments
 
+def adjust_highest_segment_for_length(output_prob, token_lengths, max_chunk_size, threshold, scaling_factor_base):
+    segment_size = sum(token_lengths)
+    output_prob = np.array(output_prob)
+    
+    if segment_size > max_chunk_size:
+        # If the segment is too long, find the index of the highest probability
+        highest_prob_idx = np.argmax(output_prob)
+        
+        # Boost the highest probability to ensure it exceeds the threshold
+        if output_prob[highest_prob_idx] <= threshold:
+            # Increase only the highest probability by multiplying with the scaling factor
+            excess_ratio = segment_size / max_chunk_size
+            scaling_factor = scaling_factor_base * excess_ratio
+            output_prob[highest_prob_idx] *= 1000  # Boost the highest probability
+        print("buck")
+        # Adjust the segment decisions: only the highest probability will be boosted
+        adjusted_segments = output_prob > threshold
+    else:
+        # If the segment size is within limits, use the default segmentation
+        adjusted_segments = output_prob > threshold
+
+    return adjusted_segments
+
+def plot_segment_lengths(segment_lengths):
+    # Calculate the average token length for all segments
+    avg_token_length = sum(segment_lengths) / len(segment_lengths)
+    
+    # Plot the segment token lengths
+    plt.figure(figsize=(10, 5))
+    plt.plot(segment_lengths, marker='o', label='Segment Token Length')
+    plt.axhline(avg_token_length, color='r', linestyle='--', label=f'Average Token Length: {avg_token_length:.2f}')
+    plt.title('Token Lengths Per Segment')
+    plt.xlabel('Segment Number')
+    plt.ylabel('Segment Token Length')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
 def main(args):
     start = timer()
 
@@ -128,7 +167,7 @@ def main(args):
             print('running on dataset: ', args.dataset)
             # We're handling 512 tokens on avr
             # if args.max_chunk_size == 1024:
-            json_file_path = f"RAG\data_3072\{args.dataset}\individual_documents"
+            json_file_path = f"RAG\data_512_1024\{args.dataset}\individual_documents_2048"
             # # We're handline 1024 on avarage
             # else:
             #     json_file_path = f"RAG\data\{args.dataset}\individual_documents_2048"
@@ -156,6 +195,7 @@ def main(args):
             segment_output_file = open(f'{args.dataset}_segment_output.txt', 'w')
             
             accumulated_probs = []  # Accumulate probabilities for sentences in a segment
+            segment_token_lengths = []
             for i, (data, targets, paths) in enumerate(dl):
                 if i == args.stop_after:
                     break
@@ -169,14 +209,15 @@ def main(args):
                 output_probability = output_prob[:, 1]
                 if args.dataset == 'qasper':
                     print('qasper')
-                    seg_threshold =  args.seg_threshold
-                elif args.dataset == 'narativeqa':
-                    print('narativeqa')
+                    # seg_threshold =  args.seg_threshold
+                    seg_threshold = np.percentile(output_probability, 85)
+                elif args.dataset == 'narrativeqa':
+                    print('narrativeqa')
                     # Use for qasper
                     seg_threshold = np.percentile(output_probability, 97)
                 else:
                     print("quality")
-                    seg_threshold = np.percentile(output_probability, 98)
+                    seg_threshold = np.percentile(output_probability, 93)
                 # print(seg_threshold)
                 # output_seg = output_probability > args.seg_threshold
                 output_seg = output_probability > seg_threshold
@@ -199,19 +240,24 @@ def main(args):
                     accumulated_probs = []
                     start_idx = 0  # Track the start of the current segment
                     content = paths[k][1]
+                    current_segment_token_length = 0
+
                     for i in range(len(h) - 1):
                         sentence = content[i]
                         sentence_length = len(tokenizer.encode(sentence, truncation=True))
-
+                        current_segment_token_length += sentence_length
                         accumulated_token_lengths.append(sentence_length)
                         accumulated_probs.append(output_probability[i])
 
                         # If we encounter a `1` (end of a segment)
                         if h[i] == 1:
+                            # segment_token_lengths.append(current_segment_token_length)
+                            # print(f"Segment {len(segment_token_lengths)} token length: {current_segment_token_length}")
+                            
                             # Check if the accumulated segment is too long
                             if sum(accumulated_token_lengths) > max_chunk_size:
                                 # Adjust the segmentation for the current segment
-                                adjusted_segments = adjust_segment_for_length(
+                                adjusted_segments = adjust_highest_segment_for_length(
                                     accumulated_probs, 
                                     accumulated_token_lengths, 
                                     max_chunk_size, 
@@ -221,10 +267,38 @@ def main(args):
                                 h[start_idx:i + 1] = np.logical_or(h[start_idx:i + 1], adjusted_segments)
                                 segment_output_file.write(f'New Segments: {h}\n')
                             # Reset accumulators for the next segment
+                            current_segment_token_length = 0
                             accumulated_token_lengths = []
                             accumulated_probs = []
                             start_idx = i + 1 
 
+                    for i in range(len(h) - 1):
+                        sentence = content[i]
+                        sentence_length = len(tokenizer.encode(sentence, truncation=True))
+                        current_segment_token_length += sentence_length
+
+                        # If we encounter a `1` (end of a segment)
+                        if h[i] == 1:
+                            segment_token_lengths.append(current_segment_token_length)
+                            print(f"Segment {len(segment_token_lengths)} token length: {current_segment_token_length}")
+                            
+                            # Check if the accumulated segment is too long
+                            # if sum(accumulated_token_lengths) > max_chunk_size:
+                                # Adjust the segmentation for the current segment
+                                # adjusted_segments = adjust_highest_segment_for_length(
+                                #     accumulated_probs, 
+                                #     accumulated_token_lengths, 
+                                #     max_chunk_size, 
+                                #     seg_threshold, 
+                                #     scaling_factor_base
+                                # )
+                                # h[start_idx:i + 1] = np.logical_or(h[start_idx:i + 1], adjusted_segments)
+                                # segment_output_file.write(f'New Segments: {h}\n')
+                            # Reset accumulators for the next segment
+                            current_segment_token_length = 0
+                            accumulated_token_lengths = []
+                            accumulated_probs = []
+                            start_idx = i + 1 
                     # =================================================================
                     t = np.append(t.cpu().numpy(), [1])
                     acc.update(h,t, sentences_length=sentences_length)
@@ -266,7 +340,7 @@ def main(args):
         logger.info('Average accuracy: %s', average_accuracy)
         logger.info('Pk: {:.4}.'.format(calculated_pk))
         logger.info('F1: {:.4}.'.format(preds_stats.get_f1()))
-
+        plot_segment_lengths(segment_token_lengths)
 
         end = timer()
         print ('Seconds to execute to whole flow: ' + str(end - start))
