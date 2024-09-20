@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt
 random_number = random.randint(1000, 9999)
 
 # Set up logging with the random number in the file name
-logging.basicConfig(filename=f'{random_number}.txt', level=logging.INFO)
+logging.basicConfig(filename=f'file.txt', level=logging.INFO)
 model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
 def configure_logging(dataset_name, chunk_type):
