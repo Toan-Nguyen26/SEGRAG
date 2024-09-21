@@ -121,3 +121,8 @@ data
 concatenated_documents
 wikidataset
 burr
+RAG/data_256_512
+RAG/data_256_512.zip
+RAG/data_512_1024
+RAG/data_512_1024.zip
+RAG/data_3072
