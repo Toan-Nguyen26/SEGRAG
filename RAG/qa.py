@@ -629,7 +629,7 @@ def quality_prompt_and_answer(top_chunks, question, answer_choices):
 
 # -----------------------------------MAIN FUNTIONS-----------------------------------
 def qasper_testing(chunk_type='256'):
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
+    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
     original_documents = load_json_folder(folder_path=f'data_256_512/{args.dataset}/individual_documents_2048')
 
     # To accumulate scores
@@ -668,7 +668,7 @@ def qasper_testing(chunk_type='256'):
     return
 
 def narrativeqa_testing(chunk_type='256'):
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
+    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
     original_documents = load_json_folder(folder_path=f'data_256_512/{args.dataset}/individual_documents_2048')
     rouge_metric = evaluate.load("rouge") # type: ignore
     bleu_metric = evaluate.load("bleu") # type: ignore
@@ -742,7 +742,7 @@ def narrativeqa_testing(chunk_type='256'):
 # Multiple choice, so accuracy is prefer here
 def quality_testing(chunk_type='256'):
     # embedding_document = load_data(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json')
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
+    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
     original_documents = load_json_folder(folder_path=f'data_256_512/{args.dataset}/individual_documents_2048')
     accuracy = 0
     ground_truth_answers = []
