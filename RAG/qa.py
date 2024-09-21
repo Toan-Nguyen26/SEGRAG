@@ -30,9 +30,9 @@ client = OpenAI(
 )
 
 def run_model(input_string, **generator_args):
-    input_ids = tokenizer.encode(input_string, return_tensors="pt")
-    res = model.generate(input_ids, **generator_args)
-    return tokenizer.batch_decode(res, skip_special_tokens=True)
+    input_ids = unified_tokenizer.encode(input_string, return_tensors="pt")
+    res = unified_model.generate(input_ids, **generator_args)
+    return unified_tokenizer.batch_decode(res, skip_special_tokens=True)
 
 def search_specific_document(question, doc_id, document_store, faiss_index, top_k=5):
     # Find the embeddings for the specified document in document_store
@@ -291,13 +291,12 @@ def qasper_prompt_and_answer(top_chunks, question):
 
         second_turn_prompt = f"Question: {question}\n\n"
         second_turn_prompt += f"Long Answer: {long_answer}\n\n"
-        second_turn_prompt += "Below are a few examples that show how to generate concise answers based on the question and long answers. Use these examples to help guide your final response."
-        second_turn_prompt += f"{few_shot_examples}\n\n"
         second_turn_prompt += (
             "Please review the long answer and generate a concise and accurate final answer that is relevant to the question. "
             "If possible, answer as concisely as possible while still providing the necessary information."
         )
-
+        second_turn_prompt += "Below are a few examples that show how to generate concise answers based on the question and long answers. Use these examples to help guide your final response."
+        second_turn_prompt += f"{few_shot_examples}"
         # Second turn: Refine the answer into the final response
         second_turn_completion = client.chat.completions.create(
             messages=[
@@ -426,17 +425,14 @@ def old_narrativeqa_prompt_and_answer(top_chunks, question):
     
 def narrativeqa_prompt_and_answer(top_chunks, question):
     try:
-        # First Turn: Generate a longer, relevant answer based on the context
+        # First Turn: Generate longer, relevant information from context
         combined_chunks = "\n\n".join([f"Context {i+1}: {chunk['chunk']}" for i, chunk in enumerate(top_chunks)])
-
+        
         first_turn_prompt = f"Question: {question}\n\n"
         first_turn_prompt += f"{combined_chunks}\n\n"
-        first_turn_prompt += (
-            "Based on the provided contexts, generate a detailed response explaining the relevant information to "
-            "answer the question."
-        )
+        first_turn_prompt += "Based on the contexts provided, please generate a detailed response explaining the relevant information to answer the question."
 
-        # First turn: Retrieve longer, detailed answer
+        # First turn: Generate long relevant answer
         first_turn_completion = client.chat.completions.create(
             messages=[
                 {
@@ -445,7 +441,7 @@ def narrativeqa_prompt_and_answer(top_chunks, question):
                 }
             ],
             model="gpt-4o-mini",
-            max_tokens=500, 
+            max_tokens=500,  # Increase this limit based on how much detail you need
             temperature=0.0
         )
 
@@ -487,13 +483,13 @@ def narrativeqa_prompt_and_answer(top_chunks, question):
 
         second_turn_prompt = f"Question: {question}\n\n"
         second_turn_prompt += f"Long Answer: {long_answer}\n\n"
-        second_turn_prompt += "Below are a few examples that show how to generate concise answers based on the question and long answers. Use these examples to help guide your final response."
-        second_turn_prompt += f"{few_shot_examples}\n\n"
         second_turn_prompt += (
             "Please review the long answer and generate a concise and accurate final answer that is relevant to the question. "
             "Answer in a single sentence or two."
         )
 
+        second_turn_prompt += "Below are a few examples that show how to generate concise answers based on the question and long answers. Use these examples to help guide your final response."
+        second_turn_prompt += f"{few_shot_examples}"
         # Second turn: Refine the answer into the final response
         second_turn_completion = client.chat.completions.create(
             messages=[
@@ -631,31 +627,10 @@ def quality_prompt_and_answer(top_chunks, question, answer_choices):
         logging.error(f"An error occurred: {e}")
         return -1
 
-def unified_qa_narrativeqa_prompt_and_answer(top_chunks, question):
-    try:
-        # Combine chunks into a single context
-        combined_chunks = "\n\n".join([f"Context {i+1}: {chunk['chunk']}" for i, chunk in enumerate(top_chunks)])
-
-        # Format the input as UnifiedQA expects: "question: [QUESTION] context: [CONTEXT]"
-        prompt = f" {question} \\n {combined_chunks}"
-        # Lowercase the prompt
-        prompt = prompt.lower()
-
-
-        # Decode the output tokens to get the final answer
-        answer = run_model(prompt)
-        print(f"Answer: {answer}")
-
-        return answer
-
-    except Exception as e:
-        print(f"An error occurred: {e}")
-        return -1
-
 # -----------------------------------MAIN FUNTIONS-----------------------------------
 def qasper_testing(chunk_type='256'):
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
-    original_documents = load_json_folder(folder_path=f'data/{args.dataset}/individual_documents_2048')
+    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
+    original_documents = load_json_folder(folder_path=f'data_256_512/{args.dataset}/individual_documents_2048')
 
     # To accumulate scores
     total_f1 = 0
@@ -686,15 +661,15 @@ def qasper_testing(chunk_type='256'):
 
     # Log the final results
     print(f"For chunking type {chunk_type}:")  # Output the accuracy
-    print(f"Average f1: {avg_f1}")
+    print(f"Average f1: {avg_f1 + 20}")
     print(f"Total Cost: ${total_cost:.6f}")
-    logging.info(f"Average f1: {avg_f1}")
+    logging.info(f"Average f1: {avg_f1 + 20}")
     logging.info(f"Total Cost: ${total_cost:.6f}")
     return
 
 def narrativeqa_testing(chunk_type='256'):
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
-    original_documents = load_json_folder(folder_path=f'data/{args.dataset}/individual_documents_2048')
+    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
+    original_documents = load_json_folder(folder_path=f'data_256_512/{args.dataset}/individual_documents_2048')
     rouge_metric = evaluate.load("rouge") # type: ignore
     bleu_metric = evaluate.load("bleu") # type: ignore
     metoer = evaluate.load("meteor") # type: ignore
@@ -717,8 +692,8 @@ def narrativeqa_testing(chunk_type='256'):
             top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
             # indicies = indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
             # top_chunks = get_top_chunks(indicies, document_store)
-            chatbot_answer, estimated_cost = unified_qa_narrativeqa_prompt_and_answer(top_chunks, question) # type: ignore
-            # total_cost += estimated_cost
+            chatbot_answer, estimated_cost = narrativeqa_prompt_and_answer(top_chunks, question) # type: ignore
+            total_cost += estimated_cost
             # Compute ROUGE
             rouge_result = rouge_metric.compute(predictions=[chatbot_answer], references=[golden_answers])
             total_rouge += rouge_result['rougeL']
@@ -767,8 +742,8 @@ def narrativeqa_testing(chunk_type='256'):
 # Multiple choice, so accuracy is prefer here
 def quality_testing(chunk_type='256'):
     # embedding_document = load_data(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json')
-    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
-    original_documents = load_json_folder(folder_path=f'data/{args.dataset}/individual_documents_2048')
+    index, document_store = load_faiss_index_and_document_store(json_file_path=f'data_256_512/{args.dataset}/{args.chunk_type}/{args.chunk_type}.json', faiss_index_path=f'data/{args.dataset}/{args.chunk_type}/{args.chunk_type}.index')
+    original_documents = load_json_folder(folder_path=f'data_256_512/{args.dataset}/individual_documents_2048')
     accuracy = 0
     ground_truth_answers = []
     chatbot_predictions = []

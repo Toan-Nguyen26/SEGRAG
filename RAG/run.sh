@@ -15,17 +15,29 @@
 
 # cd RAG
 
-python qa.py --dataset narrativeqa --top_k 5 --chunk_type seg
+python qa.py --dataset narrativeqa --top_k 20 --chunk_type 256
 
-python qa.py --dataset narrativeqa --top_k 5 --chunk_type segclus
+python qa.py --dataset narrativeqa --top_k 8 --chunk_type 512
 
-python qa.py --dataset quality --top_k 5 --chunk_type seg
+python qa.py --dataset narrativeqa --top_k 4 --chunk_type 1024
 
-python qa.py --dataset quality --top_k 5 --chunk_type segclus
+python qa.py --dataset narrativeqa --top_k 20 --chunk_type seg
 
-python qa.py --dataset qasper --top_k 5 --chunk_type seg
+python qa.py --dataset qasper --top_k 20 --chunk_type 256
 
-python qa.py --dataset qasper --top_k 5 --chunk_type segclus
+python qa.py --dataset qasper --top_k 8 --chunk_type 512
+
+python qa.py --dataset qasper --top_k 4 --chunk_type 1024
+
+python qa.py --dataset qasper --top_k 20 --chunk_type seg
+
+python qa.py --dataset quality --top_k 20 --chunk_type 256
+
+python qa.py --dataset quality --top_k 8 --chunk_type 512
+
+python qa.py --dataset quality --top_k 4 --chunk_type 1024
+
+python qa.py --dataset quality --top_k 20 --chunk_type seg
 
 # python test_accuracy.py --cuda --model checkpoints_new/best_model.t7 --wiki --dataset quality --is_json True --bs 1 --max_chunk_size 1024 --seg_threshold 0.3 
 
