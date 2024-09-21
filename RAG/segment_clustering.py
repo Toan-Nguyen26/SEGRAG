@@ -29,7 +29,8 @@ def create_relatedness_graph(embeddings, threshold):
     print(f"The graph is {graph}")
     return graph, set(graph.keys())
 
-def create_relatedness_graph(embeddings, k=1.0):
+
+def create_relatedness_graph_soft(embeddings, k=1.0):
     # Initialize graph
     graph = {i + 1: set() for i in range(len(embeddings))}
     

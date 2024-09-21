@@ -8,6 +8,7 @@ from transformers import AutoTokenizer
 from sentence_transformers import SentenceTransformer, util
 import uuid
 from argparse import ArgumentParser
+from cluster.cluster_helper_functions import combine_sentences
 from langchain.text_splitter import RecursiveCharacterTextSplitter, CharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
 from langchain_community.vectorstores import FAISS
@@ -23,7 +24,7 @@ import matplotlib.pyplot as plt
 random_number = random.randint(1000, 9999)
 
 # Set up logging with the random number in the file name
-logging.basicConfig(filename=f'{random_number}.txt', level=logging.INFO)
+logging.basicConfig(filename=f'file.txt', level=logging.INFO)
 model = SentenceTransformer("BAAI/bge-m3", cache_folder='/path/to/local/cache')
 tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
 def configure_logging(dataset_name, chunk_type):
@@ -44,7 +45,6 @@ def configure_logging(dataset_name, chunk_type):
 
     # Log the dataset name and chunk type to distinguish the log session
     logging.info(f"Starting logging for dataset: {dataset_name}, chunk type: {chunk_type}")
-
 
 def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=2000):
     # First, split the text into smaller word chunks to avoid tokenizing large texts at once
@@ -76,6 +76,50 @@ def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=2000):
     print(f"Number of token chunks: {len(chunks)}")
     return chunks
 
+def semantic_chunking(text, tokenizer, similarity_threshold=0.85):
+    # Step 1: Split the text into sentences
+    nlp = spacy.load("en_core_web_sm")
+    doc = nlp(text)
+    sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
+    
+    # Step 2: Group sentences (currently grouping 3 at a time, but this can be adjusted)
+    combined_sentences = combine_sentences(sentences, buffer_size=1)
+    
+    # Step 3: Tokenize and embed each group of combined sentences
+    sentence_embeddings = []
+    for group in combined_sentences:
+        tokenized_group = tokenizer(group, return_tensors='pt', truncation=False)['input_ids'][0]
+        embedded_group = model.encode(group, convert_to_tensor=True)
+        sentence_embeddings.append(embedded_group)
+    
+    # Step 4: Compare cosine similarity between consecutive sentence groups
+    cosine_similarities = []
+    for i in range(len(sentence_embeddings) - 1):
+        cos_sim = util.pytorch_cos_sim(sentence_embeddings[i], sentence_embeddings[i+1])
+        cosine_similarities.append(cos_sim.item())  # Convert tensor to float
+    
+    # Step 5: Chunk based on the cosine similarity threshold
+    chunks = []
+    current_chunk = combined_sentences[0]  # Start with the first group of sentences
+    for i in range(len(cosine_similarities)):
+        if cosine_similarities[i] >= similarity_threshold:
+            # If the similarity is high, merge the next group into the current chunk
+            current_chunk += " " + combined_sentences[i+1]
+        else:
+            # If not, start a new chunk
+            chunks.append(current_chunk)
+            current_chunk = combined_sentences[i+1]
+    
+    # Add the last chunk
+    chunks.append(current_chunk)
+
+    # Step 6: Return the chunks
+    print(f"Semantic Chunking complete. Number of chunks: {len(chunks)}")
+    for i, chunk in enumerate(chunks):
+        embedding = model.encode(chunks)
+        print(f"Chunk {i+1}: {chunk[:20]}...")  # Print the first 100 characters of each chunk
+    
+    return chunks
 
 def chunk_text_by_segment(text, seg_array, tokenizer, title=None, doc_id=None):
     # Load spaCy model for sentence segmentation
@@ -179,6 +223,8 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             # Split the text into smaller chunks that can be tokenized within model limits
             if args.chunk_type == '256' or args.chunk_type == '512' or args.chunk_type == '1024' or args.chunk_type == '2048':
                 text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
+            elif args.chunk_type == 'semantics':
+                text_chunks = semantic_chunking(content, tokenizer)
             else:
                 text_chunks = chunk_text_by_segment(content, segmented_sentences, tokenizer, title, doc_id)
             # text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
