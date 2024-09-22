@@ -30,8 +30,7 @@ def create_relatedness_graph(embeddings, threshold):
     print(f"The graph is {graph}")
     return graph, set(graph.keys())
 
-
-def create_relatedness_graph_soft(embeddings, k=1.0):
+def create_relatedness_graph_soft(embeddings, k_value):
     # Initialize graph
     graph = {i + 1: set() for i in range(len(embeddings))}
     
@@ -46,7 +45,7 @@ def create_relatedness_graph_soft(embeddings, k=1.0):
     std_similarity = np.std(upper_triangle_values)
     
     # Set the initial threshold based on mean + k * std
-    initial_threshold = mean_similarity + k * std_similarity
+    initial_threshold = mean_similarity + k_value * std_similarity
     print(f"Initial threshold: {initial_threshold}")
     
     # Function to calculate the edge density
@@ -62,27 +61,26 @@ def create_relatedness_graph_soft(embeddings, k=1.0):
                 graph[i + 1].add(j + 1)
                 graph[j + 1].add(i + 1)
     
-    # Step 2: Calculate initial edge density
-    current_density = calculate_edge_density(graph, len(embeddings))
-    print(f"Initial edge density: {current_density}")
+    # # Step 2: Calculate initial edge density
+    # current_density = calculate_edge_density(graph, len(embeddings))
+    # print(f"Initial edge density: {current_density}")
     
-    # Step 3: Apply edge density "softening"
-    # Soften the threshold based on edge density (reduce threshold by a factor based on density)
-    softened_threshold = initial_threshold * (1 - current_density)
-    print(f"Softened threshold: {softened_threshold}")
+    # # Step 3: Apply edge density "softening"
+    # # Soften the threshold based on edge density (reduce threshold by a factor based on density)
+    # softened_threshold = initial_threshold * (1 - current_density)
+    # print(f"Softened threshold: {softened_threshold}")
     
-    # Reset graph and use the softened threshold
-    graph = {i + 1: set() for i in range(len(embeddings))}
+    # # Reset graph and use the softened threshold
+    # graph = {i + 1: set() for i in range(len(embeddings))}
     
-    for i in range(len(embeddings)):
-        for j in range(i + 1, len(embeddings)):
-            if similarity_matrix[i, j] > softened_threshold:
-                graph[i + 1].add(j + 1)
-                graph[j + 1].add(i + 1)
+    # for i in range(len(embeddings)):
+    #     for j in range(i + 1, len(embeddings)):
+    #         if similarity_matrix[i, j] > softened_threshold:
+    #             graph[i + 1].add(j + 1)
+    #             graph[j + 1].add(i + 1)
     
     print(f"Final graph is {graph}")
     return graph, set(graph.keys())
-
 
 def find_maximal_cliques_with_pivot(graph):
     cliques = []
@@ -168,6 +166,7 @@ def merge_single_sentence_segments_in_place(total_data, total_embeddings):
 
         # Check if the segment is a single sentence
         if len(sentences) == 1:
+            
             single_embedding = total_embeddings[i]
 
             # Compute similarity with the previous and next segments
@@ -217,7 +216,11 @@ def compute_segment_relatedness(segment1, segment2, sentence_embeddings):
     return total_relatedness / (len(segment1) * len(segment2))
 
 
-def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings, max_chunk_size, threshold=0.5):
+def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings, max_chunk_size, k_value, threshold=0.5):
+    final_data = []
+    final_embeddings = []
+    total_chunk_size = 0
+    total_chunks_count = 0
     for doc_id, doc_data in grouped_data.items():
         embeddings = [doc_data[chunk]['embedding'] for chunk in doc_data]
         first_chunk_key = next(iter(doc_data))
@@ -240,7 +243,7 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
             continue  # Skip to the next document
 
         # Step 1: Create relatedness graph based on embeddings and threshold
-        relatedness_graph, all_segments = create_relatedness_graph(embeddings, threshold)
+        relatedness_graph, all_segments = create_relatedness_graph_soft(embeddings, k_value)
 
         # Step 2: Apply Bron-Kerbosch to find maximal cliques
         maximal_cliques = find_maximal_cliques_with_pivot(relatedness_graph)
@@ -254,14 +257,13 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         # new_chunk_id = len(embeddings)+1  
         new_chunk_id = 1
 
+        added_time = 0
         total_embeddings = []
         total_data = []
-        added_time = 0
         for segment in merged_segments:
             # print(segment)
             # if len(segment) == 1:
             #     continue 
-
             current_chunk = []  # To hold concatenated text chunks
             current_embedding_list = []  # To hold embeddings for averaging
             total_length = 0  # Initialize total length
@@ -292,14 +294,27 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                 new_chunk_id += 1
                 added_time = 0
                 total_embeddings.append(embedding)
-    
+        item1, item2 = merge_single_sentence_segments_in_place(total_data, total_embeddings)
         # handle sittuation where only a sentnece is a segment
-    return merge_single_sentence_segments_in_place(total_data, total_embeddings)
-    # return total_data, total_embeddings # type: ignore
+        for i in range(len(item1)):
+            total_chunk_size += item1[i]['chunk_size']
+            total_chunks_count += 1
+            final_data.append({
+                'chunk_id': i + 1,
+                'doc_id': item1[i]['doc_id'],
+                'title': item1[i]['title'],
+                'chunk': item1[i]['chunk'],
+                'chunk_size': item1[i]['chunk_size'],
+                'embedding': item1[i]['embedding']
+            })
+            final_embeddings.append(item2[i])
+        total_data = []
+        total_embeddings = []
+    return final_data, final_embeddings, total_chunk_size, total_chunks_count # type: ignore
 
-def cluster_segment(loaded_data, embeddings, max_chunk_size):
+def cluster_segment(loaded_data, embeddings, max_chunk_size, k_value):
     grouped_data = group_chunks_by_doc_and_chunk_id(loaded_data)
-    return process_json_with_merged_segments(grouped_data, loaded_data,  embeddings, max_chunk_size)
+    return process_json_with_merged_segments(grouped_data, loaded_data,  embeddings, max_chunk_size, k_value)
 
 # Example usage
 if __name__ == "__main__":
