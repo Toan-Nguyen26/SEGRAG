@@ -76,7 +76,7 @@ def chunk_text_by_tokens(text, chunk_size, tokenizer, max_words_per_chunk=2000):
     print(f"Number of token chunks: {len(chunks)}")
     return chunks
 
-def semantic_chunking(text, tokenizer, similarity_threshold=0.85):
+def semantic_chunking(text, percentiles=85, max_token_length=4000):
     # Step 1: Split the text into sentences
     nlp = spacy.load("en_core_web_sm")
     doc = nlp(text)
@@ -89,16 +89,19 @@ def semantic_chunking(text, tokenizer, similarity_threshold=0.85):
     sentence_embeddings = []
     for group in combined_sentences:
         tokenized_group = tokenizer(group, return_tensors='pt', truncation=False)['input_ids'][0]
-        embedded_group = model.encode(group, convert_to_tensor=True)
-        sentence_embeddings.append(embedded_group)
-    
+        if len(tokenized_group) <= 8000:
+          embedded_group = model.encode(group, convert_to_tensor=True)
+          sentence_embeddings.append(embedded_group)
+    print("done")
     # Step 4: Compare cosine similarity between consecutive sentence groups
     cosine_similarities = []
     for i in range(len(sentence_embeddings) - 1):
         cos_sim = util.pytorch_cos_sim(sentence_embeddings[i], sentence_embeddings[i+1])
         cosine_similarities.append(cos_sim.item())  # Convert tensor to float
-    
-    # Step 5: Chunk based on the cosine similarity threshold
+    similarity_threshold = np.percentile(cosine_similarities, percentiles)
+    print(f"Calculated {percentiles}th percentile similarity threshold: {similarity_threshold}")
+
+    # Step 5: Chunk based on the cosine similarity threshold and token length limit
     chunks = []
     current_chunk = combined_sentences[0]  # Start with the first group of sentences
     current_chunk_tokens = tokenizer(current_chunk, return_tensors='pt', truncation=False)['input_ids'][0]
@@ -109,11 +112,23 @@ def semantic_chunking(text, tokenizer, similarity_threshold=0.85):
         next_group_tokens = tokenizer(next_group, return_tensors='pt', truncation=False)['input_ids'][0]
 
         if cosine_similarities[i] >= similarity_threshold:
-            # If the similarity is high, merge the next group into the current chunk
-            current_chunk += " " + next_group
-            current_chunk_tokens = torch.cat((current_chunk_tokens, next_group_tokens))  # Merge tokens
+            # Check if adding the next group exceeds the token limit
+            print(f"Current chunk tokens: {len(current_chunk_tokens)}, Next group tokens: {len(next_group_tokens)}")
+            if len(current_chunk_tokens) + len(next_group_tokens) <= max_token_length:
+                # If not, merge the next group into the current chunk
+                current_chunk += " " + next_group
+                current_chunk_tokens = torch.cat((current_chunk_tokens, next_group_tokens))  # Merge tokens
+            else:
+                # If it exceeds the limit, store the current chunk and start a new one
+                chunks.append((current_chunk, len(current_chunk_tokens)))
+                logging.info(f"Chunk {total_chunks + 1}: Size = {len(current_chunk_tokens)} tokens.")
+                total_chunks += 1
+
+                # Start a new chunk with the next group
+                current_chunk = next_group
+                current_chunk_tokens = next_group_tokens
         else:
-            # If not, store the current chunk with its size
+            # If the similarity is low, store the current chunk
             chunks.append((current_chunk, len(current_chunk_tokens)))
             logging.info(f"Chunk {total_chunks + 1}: Size = {len(current_chunk_tokens)} tokens.")
             total_chunks += 1
@@ -122,10 +137,11 @@ def semantic_chunking(text, tokenizer, similarity_threshold=0.85):
             current_chunk = next_group
             current_chunk_tokens = next_group_tokens
 
-    # Add the last chunk
-    chunks.append((current_chunk, len(current_chunk_tokens)))
-    total_chunks += 1
-    logging.info(f"Chunk {total_chunks}: Size = {len(current_chunk_tokens)} tokens.")
+    # Add the last chunk if not already added
+    if current_chunk:
+        chunks.append((current_chunk, len(current_chunk_tokens)))
+        logging.info(f"Chunk {total_chunks + 1}: Size = {len(current_chunk_tokens)} tokens.")
+        total_chunks += 1
 
     # Step 6: Return the chunks and their token sizes
     print(f"Semantic Chunking complete. Number of chunks: {len(chunks)}")
@@ -300,7 +316,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
 def main(args):
     if args.dataset:
         if args.max_file_size != 0:
-            json_directory_path = f'data/{args.dataset}/individual_documents_2048'
+            json_directory_path = f'data_256_512/{args.dataset}/individual_documents_2048'
         else:
             json_directory_path = f'data/{args.dataset}/individual_documents'
         # embedding_testing()

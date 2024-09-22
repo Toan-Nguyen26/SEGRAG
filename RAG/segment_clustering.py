@@ -7,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from cluster.cluster_helper_functions import group_chunks_by_doc_and_chunk_id, write_json_to_file, determine_average_threshold, determine_percentile_threshold, hard_code_graph, bron_kerbosch, bron_kerbosch_with_pivot
 import logging
 import faiss
+from sentence_transformers import util
 import spacy
 
 logging.basicConfig(filename='segment_clustering.log', level=logging.INFO, format='%(message)s')
@@ -153,48 +154,69 @@ def merge_segments(SG, cliques):
     print(f"Final segments: {new_SG}")
     return new_SG
 
-# def merge_single_sentence_segments(new_SG, cliques):
-#     final_SG = []
-#     i = 0
+def merge_single_sentence_segments_in_place(total_data, total_embeddings):
+    """
+    This function iterates through the final total_data and total_embeddings to 
+    merge single-sentence segments with neighboring segments.
+    """
+    nlp = spacy.load("en_core_web_sm")
+    i = 0
 
-#     while i < len(new_SG):
-#         sgi = new_SG[i]
-#         nlp = spacy.load("en_core_web_sm")
-#         doc = nlp(text)
-#         sentences = [sent.text for sent in doc.sents]  # Extract sentences from spaCy
-#         # merged = False
-#         # if i < len(new_SG) - 1:
-#         #     sgi1 = new_SG[i + 1]
-#         #     for clique in cliques:
-#         #         # Check if there's an intersection between the two segments and the clique
-#         #         if any(item in clique for item in sgi) and any(item in clique for item in sgi1):
-#         #             # Merge the two segments by combining and sorting them, avoiding duplicates
-#         #             merged_segment = sorted(set(sgi + sgi1))
-#         #             final_SG.append(merged_segment)  # Add the merged segment
-#         #             merged = True
-#         #             i += 2  # Skip the next segment as it has been merged
-#         #             break
-        
-#         # if not merged:
-#         #     final_SG.append(sgi) 
-#         #     i += 1
+    while i < len(total_data):
+        doc = nlp(total_data[i]['chunk'])
+        sentences = [sent.text for sent in doc.sents]
 
-#     print(f"Final segments: {final_SG}")
-#     return final_SG
+        # Check if the segment is a single sentence
+        if len(sentences) == 1:
+            single_embedding = total_embeddings[i]
 
+            # Compute similarity with the previous and next segments
+            if i > 0:
+                prev_embedding = total_embeddings[i - 1]
+                similarity_with_prev = util.pytorch_cos_sim(single_embedding, prev_embedding).item()
+            else:
+                similarity_with_prev = float('-inf')
 
-# Main function to process JSON input and run Bron-Kerbosch
-def process_json_and_bron_kerbosch_with_text(grouped_data, embeddings, threshold=0.5):
-    # Run the existing Bron-Kerbosch process
-    relatedness_graph, all_segments = create_relatedness_graph(embeddings, threshold)
-    maximal_cliques = find_maximal_cliques_with_pivot(relatedness_graph)
-    initial_segments = create_initial_segments(maximal_cliques, all_segments)
-    merged_segments = merge_segments(initial_segments, maximal_cliques)
+            if i < len(total_data) - 1:
+                next_embedding = total_embeddings[i + 1]
+                similarity_with_next = util.pytorch_cos_sim(single_embedding, next_embedding).item()
+            else:
+                similarity_with_next = float('-inf')
+
+            # Merge with the more similar neighboring segment
+            if similarity_with_prev > similarity_with_next and i > 0:
+                total_data[i - 1]['chunk'] += " " + total_data[i]['chunk']
+                total_data[i - 1]['chunk_size'] += total_data[i]['chunk_size']
+                total_embeddings[i - 1] = (total_embeddings[i - 1] + total_embeddings[i]) / 2
+                total_data[i + 1]['embedding'] = total_embeddings[i + 1].tolist()
+                del total_data[i]
+                del total_embeddings[i]
+                i -= 1  # Stay at the same index to check for further merges
+            elif i < len(total_data) - 1:
+                total_data[i + 1]['chunk'] = total_data[i]['chunk'] + " " + total_data[i + 1]['chunk']
+                total_data[i + 1]['chunk_size'] += total_data[i]['chunk_size']
+                total_embeddings[i + 1] = (total_embeddings[i] + total_embeddings[i + 1]) / 2
+                total_data[i + 1]['embedding'] = total_embeddings[i + 1].tolist()
+                del total_data[i]
+                del total_embeddings[i]
+            else:
+                # Edge case where no merging happens, move to the next one
+                i += 1
+        else:
+            i += 1
+
+    return total_data, total_embeddings
+
+def compute_segment_relatedness(segment1, segment2, sentence_embeddings):
+    # Compute the average relatedness between all sentence pairs from two segments
+    total_relatedness = 0
+    for sent1 in segment1:
+        for sent2 in segment2:
+            total_relatedness += cosine_similarity(sentence_embeddings[sent1], sentence_embeddings[sent2])
     
-    # Create the new JSON structure with concatenated text and total length
-    new_json = []
-    return
-    
+    return total_relatedness / (len(segment1) * len(segment2))
+
+
 def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings, max_chunk_size, threshold=0.5):
     for doc_id, doc_data in grouped_data.items():
         embeddings = [doc_data[chunk]['embedding'] for chunk in doc_data]
@@ -249,32 +271,6 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                 chunk_length = doc_data[chunk_id]['chunk_size']
                 chunk_embedding = doc_data[chunk_id]['embedding']
                 
-                # If adding this chunk exceeds the 3000 token limit, save the current segment and start a new one
-                # if total_length + chunk_length > max_chunk_size:
-                #     if chunk_text:  # Make sure there's data to save
-                #         # Save the current segment
-                #         concatenated_chunk = " ".join(current_chunk)
-                #         embedding = model.encode(concatenated_chunk)
-                #         # embedding = np.mean(current_embedding_list, axis=0)
-
-                #         loaded_data.append({
-                #             'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
-                #             'doc_id': id,
-                #             'title': title,
-                #             'chunk': concatenated_chunk,
-                #             'chunk_size': total_length,
-                #             "embedding": embedding.tolist()
-                #         })
-                #         new_chunk_id += 1
-                #         list_embeddings.append(embedding)
-                    
-                #     # Reset for the next segment
-                #     current_chunk = []
-                #     current_embedding_list = []
-                #     total_length = 0
-                #     added_time = 0
-
-
                 # Add the chunk to the current segment
                 current_chunk.append(chunk_text)
                 current_embedding_list.append(chunk_embedding)
@@ -296,7 +292,10 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                 new_chunk_id += 1
                 added_time = 0
                 total_embeddings.append(embedding)
-    return total_data, total_embeddings # type: ignore
+    
+        # handle sittuation where only a sentnece is a segment
+    return merge_single_sentence_segments_in_place(total_data, total_embeddings)
+    # return total_data, total_embeddings # type: ignore
 
 def cluster_segment(loaded_data, embeddings, max_chunk_size):
     grouped_data = group_chunks_by_doc_and_chunk_id(loaded_data)
