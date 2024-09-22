@@ -101,23 +101,36 @@ def semantic_chunking(text, tokenizer, similarity_threshold=0.85):
     # Step 5: Chunk based on the cosine similarity threshold
     chunks = []
     current_chunk = combined_sentences[0]  # Start with the first group of sentences
+    current_chunk_tokens = tokenizer(current_chunk, return_tensors='pt', truncation=False)['input_ids'][0]
+    
+    total_chunks = 0
     for i in range(len(cosine_similarities)):
+        next_group = combined_sentences[i+1]
+        next_group_tokens = tokenizer(next_group, return_tensors='pt', truncation=False)['input_ids'][0]
+
         if cosine_similarities[i] >= similarity_threshold:
             # If the similarity is high, merge the next group into the current chunk
-            current_chunk += " " + combined_sentences[i+1]
+            current_chunk += " " + next_group
+            current_chunk_tokens = torch.cat((current_chunk_tokens, next_group_tokens))  # Merge tokens
         else:
-            # If not, start a new chunk
-            chunks.append(current_chunk)
-            current_chunk = combined_sentences[i+1]
-    
-    # Add the last chunk
-    chunks.append(current_chunk)
+            # If not, store the current chunk with its size
+            chunks.append((current_chunk, len(current_chunk_tokens)))
+            logging.info(f"Chunk {total_chunks + 1}: Size = {len(current_chunk_tokens)} tokens.")
+            total_chunks += 1
 
-    # Step 6: Return the chunks
+            # Start a new chunk
+            current_chunk = next_group
+            current_chunk_tokens = next_group_tokens
+
+    # Add the last chunk
+    chunks.append((current_chunk, len(current_chunk_tokens)))
+    total_chunks += 1
+    logging.info(f"Chunk {total_chunks}: Size = {len(current_chunk_tokens)} tokens.")
+
+    # Step 6: Return the chunks and their token sizes
     print(f"Semantic Chunking complete. Number of chunks: {len(chunks)}")
-    for i, chunk in enumerate(chunks):
-        embedding = model.encode(chunks)
-        print(f"Chunk {i+1}: {chunk[:20]}...")  # Print the first 100 characters of each chunk
+    for i, (chunk, token_size) in enumerate(chunks):
+        print(f"Chunk {i+1}: {chunk[:20]}... (Token size: {token_size})")  # Print the first 20 characters of each chunk and token size
     
     return chunks
 
@@ -223,7 +236,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
             # Split the text into smaller chunks that can be tokenized within model limits
             if args.chunk_type == '256' or args.chunk_type == '512' or args.chunk_type == '1024' or args.chunk_type == '2048':
                 text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
-            elif args.chunk_type == 'semantics':
+            elif args.chunk_type == 'semantic':
                 text_chunks = semantic_chunking(content, tokenizer)
             else:
                 text_chunks = chunk_text_by_segment(content, segmented_sentences, tokenizer, title, doc_id)
@@ -278,9 +291,9 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     faiss.write_index(index, output_faiss_path)
 
 
-    logging.info(f"Total number of chunks for the dataset : {len(embeddings)}")
+    logging.info(f"Total number of chunks for chunk type {args.max_file_size} the dataset {args.dataset} is: {len(embeddings)}")
     logging.info(f"Avarage chunk size is : {total_chunk_size/total_chunks_count}")
-    print(f"Total number of chunks for the dataset : {len(embeddings)}")
+    print(f"Total number of chunks for chunk type {args.max_file_size} the dataset {args.dataset} is: {len(embeddings)}")
     print(f"Avarage chunk size is : {total_chunk_size/total_chunks_count}")
     print(f"FAISS index and document chunk information have been saved to {output_faiss_path} and {output_ids_path}")
 
@@ -301,7 +314,7 @@ def main(args):
 if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa',  required=True, type=str, default="squad")
-    parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus', type=str, default='256')
+    parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus, semantic', type=str, default='256')
     parser.add_argument('--max_file_size', help='Output path for the embeddings', type=int, default=0)
     parser.add_argument('--is_cluster', help='Enable clustering of segments', action='store_true')
     args = parser.parse_args() 
