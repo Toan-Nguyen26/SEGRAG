@@ -290,7 +290,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     if args.is_cluster == True:    
         with open(output_ids_path, 'r', encoding='utf-8') as id_file:
             loaded_data = json.load(id_file)
-        loaded_data, embeddings = cluster_segment(loaded_data, embeddings, args.max_file_size)
+        loaded_data, embeddings, total_chunk_size, total_chunks_count = cluster_segment(loaded_data, embeddings, args.max_file_size, args.k)
         with open(output_ids_path, 'w', encoding='utf-8') as id_file:
             json.dump(loaded_data, id_file, ensure_ascii=False, indent=4)
 
@@ -332,6 +332,7 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa',  required=True, type=str, default="squad")
     parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus, semantic', type=str, default='256')
     parser.add_argument('--max_file_size', help='Output path for the embeddings', type=int, default=0)
+    parser.add_argument('--k', help='k variable', type=float, default=0.5)
     parser.add_argument('--is_cluster', help='Enable clustering of segments', action='store_true')
     args = parser.parse_args() 
     main(args)
