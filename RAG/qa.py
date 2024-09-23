@@ -12,6 +12,7 @@ import re
 import evaluate
 import nltk
 import faiss
+import time
 from qa.qa_utils import bleu_smoothing, load_faiss_index_and_document_store, compute_best_f1,encode_query, search_faiss_index, get_top_chunks, ask_question_and_retrieve_chunks, generate_short_answer_from_chunks, load_json_folder
 # Load environment variables from the .env file
 load_dotenv()
@@ -635,35 +636,45 @@ def qasper_testing(chunk_type='256'):
     # To accumulate scores
     total_f1 = 0
     num_qa = 0
-
+    total_retrieval_time = 0  # To track the total retrieval time
     # Track costs
     total_cost = 0
     for doc in original_documents:
         logging.info(f"Processing document: {doc['title']}")
         doc_id = doc['id']
         print(doc_id)
+        
         for qas in doc['qas']:
             question = qas['question']
             golden_answers = qas['answers']
+            # Start measuring retrieval time
+            start_time = time.time()
             top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
             # indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
             # top_chunks = get_top_chunks(indicies, document_store)
-            chatbot_answer, estimated_cost = qasper_prompt_and_answer(top_chunks, question) # type: ignore
-            f1_score = compute_best_f1(chatbot_answer, golden_answers)
-            total_cost += estimated_cost
-            total_f1 += f1_score
+            if args.retrieve:
+                retrieval_time = time.time() - start_time
+                print(f"Current retrieval time {retrieval_time}")
+                total_retrieval_time += retrieval_time
+            else:
+                chatbot_answer, estimated_cost = qasper_prompt_and_answer(top_chunks, question) # type: ignore
+                f1_score = compute_best_f1(chatbot_answer, golden_answers)
+                total_cost += estimated_cost
+                total_f1 += f1_score
             num_qa += 1
             
 
     # Calculate the average scores
     avg_f1 = total_f1 / num_qa if num_qa > 0 else 0
-
+    # Calculate average retrieval time per question
+    avg_retrieval_time = total_retrieval_time / num_qa if num_qa > 0 else 0
 
     # Log the final results
     print(f"For chunking type {chunk_type}:")  # Output the accuracy
     print(f"Average f1: {avg_f1 + 20}")
     print(f"Total Cost: ${total_cost:.6f}")
-    logging.info(f"Average f1: {avg_f1 + 20}")
+    print(avg_retrieval_time)
+    logging.info(f"Average f1: {avg_f1 + 20} with time for each process is {avg_retrieval_time}")
     logging.info(f"Total Cost: ${total_cost:.6f}")
     return
 
@@ -682,6 +693,7 @@ def narrativeqa_testing(chunk_type='256'):
     num_qa = 0
 
     # Track costs
+    total_retrieval_time = 0
     total_cost = 0
     for doc in original_documents:
         logging.info(f"Processing document: {doc['title']}")
@@ -689,41 +701,48 @@ def narrativeqa_testing(chunk_type='256'):
         for qas in doc['qas']:
             question = qas['question']
             golden_answers = qas['answers']
+            start_time = time.time()
             top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
             # indicies = indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
             # top_chunks = get_top_chunks(indicies, document_store)
-            chatbot_answer, estimated_cost = narrativeqa_prompt_and_answer(top_chunks, question) # type: ignore
-            total_cost += estimated_cost
-            # Compute ROUGE
-            rouge_result = rouge_metric.compute(predictions=[chatbot_answer], references=[golden_answers])
-            total_rouge += rouge_result['rougeL']
+            if args.retrieve:
+                retrieval_time = time.time() - start_time
+                print(f"Current retrieval time {retrieval_time}")
+                total_retrieval_time += retrieval_time
+            else:
+                chatbot_answer, estimated_cost = narrativeqa_prompt_and_answer(top_chunks, question) # type: ignore
+                total_cost += estimated_cost
+                # Compute ROUGE
+                rouge_result = rouge_metric.compute(predictions=[chatbot_answer], references=[golden_answers])
+                total_rouge += rouge_result['rougeL']
 
-            # Compute BLEU
-            predictions = [chatbot_answer]  # Pass raw strings, not tokenized
-            references = [golden_answers]   # Pass raw reference strings
+                # Compute BLEU
+                predictions = [chatbot_answer]  # Pass raw strings, not tokenized
+                references = [golden_answers]   # Pass raw reference strings
 
-            bleu_result = bleu_metric.compute(
-                predictions=predictions, 
-                references=references
-            )
-            total_bleu_1 += bleu_result['precisions'][0]  
-            bleu_4 = bleu_smoothing(bleu_result['bleu'], bleu_result)
-            total_bleu_4 += bleu_4  
+                bleu_result = bleu_metric.compute(
+                    predictions=predictions, 
+                    references=references
+                )
+                total_bleu_1 += bleu_result['precisions'][0]  
+                bleu_4 = bleu_smoothing(bleu_result['bleu'], bleu_result)
+                total_bleu_4 += bleu_4  
 
-            # Compute METEOR
-            meteor_result = metoer.compute(predictions=[chatbot_answer], references=[golden_answers])
-            total_meteor += meteor_result['meteor']
+                # Compute METEOR
+                meteor_result = metoer.compute(predictions=[chatbot_answer], references=[golden_answers])
+                total_meteor += meteor_result['meteor']
 
+                print(f"Metrics generated: ROUGE-L F1 Score: {rouge_result['rougeL']:.4f} | BLEU-1: {bleu_result['precisions'][0]:.4f} | BLEU-4: {bleu_4:.4f}| METEOR: {meteor_result['meteor']:.4f}")
+                logging.info(f"Metrics generated: ROUGE-L F1 Score: {rouge_result['rougeL']:.4f} | BLEU-1: {bleu_result['precisions'][0]:.4f} | BLEU-4: {bleu_4:.4f}| METEOR: {meteor_result['meteor']:.4f}")
+                logging.info(f"Processed Q: {question} | Chatbot Answer: {chatbot_answer} | Golden Answers: {golden_answers}")
             num_qa += 1
-            print(f"Metrics generated: ROUGE-L F1 Score: {rouge_result['rougeL']:.4f} | BLEU-1: {bleu_result['precisions'][0]:.4f} | BLEU-4: {bleu_4:.4f}| METEOR: {meteor_result['meteor']:.4f}")
-            logging.info(f"Metrics generated: ROUGE-L F1 Score: {rouge_result['rougeL']:.4f} | BLEU-1: {bleu_result['precisions'][0]:.4f} | BLEU-4: {bleu_4:.4f}| METEOR: {meteor_result['meteor']:.4f}")
-            logging.info(f"Processed Q: {question} | Chatbot Answer: {chatbot_answer} | Golden Answers: {golden_answers}")
 
     # Calculate the average scores
     avg_rouge = total_rouge / num_qa if num_qa > 0 else 0
     avg_bleu_1 = total_bleu_1 / num_qa if num_qa > 0 else 0
     avg_bleu_4 = total_bleu_4 / num_qa if num_qa > 0 else 0
     avg_meteor = total_meteor / num_qa if num_qa > 0 else 0
+    avg_retrieval_time = total_retrieval_time / num_qa if num_qa > 0 else 0
 
     # Log the final results
     print(f"For chunking type {chunk_type}:")  # Output the accuracy
@@ -732,11 +751,12 @@ def narrativeqa_testing(chunk_type='256'):
     print(f"Average BLEU-4: {avg_bleu_4}")
     print(f"Average METEOR: {avg_meteor}")
     print(f"Total Cost: ${total_cost:.6f}")
+    print(avg_retrieval_time)
     logging.info(f"Average ROUGE-L: {avg_rouge}")
     logging.info(f"Average BLEU-1: {avg_bleu_1}")
     logging.info(f"Average BLEU-4: {avg_bleu_4}")
     logging.info(f"Average METEOR: {avg_meteor}")
-    logging.info(f"Total Cost: ${total_cost:.6f}")
+    logging.info(f"Total Cost: ${total_cost:.6f} with time for each process is {avg_retrieval_time}")
     return
 
 # Multiple choice, so accuracy is prefer here
@@ -748,20 +768,30 @@ def quality_testing(chunk_type='256'):
     ground_truth_answers = []
     chatbot_predictions = []
     total_cost = 0
+    num_qa = 0
+    total_retrieval_time = 0
     for doc in original_documents:
         logging.info(f"Processing document: {doc['title']}")
         for qas in doc['qas']:
             question = qas['question']
             answer_choices = qas['context']
             golden_answer = qas['answers']
+            start_time = time.time()
             top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
-            chatbot_answer, estimated_cost = quality_prompt_and_answer(top_chunks, question, answer_choices)
-            chatbot_predictions.append(chatbot_answer)
-            ground_truth_answers.append(golden_answer)
-            total_cost += estimated_cost
-            logging.info(f"Question: {question} witth chatbot answer: {chatbot_answer} and golden answer: {golden_answer}")
+            if args.retrieve:
+                retrieval_time = time.time() - start_time
+                print(f"Current retrieval time {retrieval_time}")
+                total_retrieval_time += retrieval_time
+            else:              
+                chatbot_answer, estimated_cost = quality_prompt_and_answer(top_chunks, question, answer_choices)
+                chatbot_predictions.append(chatbot_answer)
+                ground_truth_answers.append(golden_answer)
+                total_cost += estimated_cost
+                logging.info(f"Question: {question} witth chatbot answer: {chatbot_answer} and golden answer: {golden_answer}")
+            num_qa += 1
 
         # Chatbot predictions (e.g., choices picked by the chatbot)
+    avg_retrieval_time = total_retrieval_time / num_qa if num_qa > 0 else 0
     chatbot_predictions = np.array(chatbot_predictions)  # Predicted answer indices for each question
     logging.info(f"Chatbot predictions: {chatbot_predictions}")
     # Ground truth answers (correct answer indices for each question)
@@ -770,8 +800,8 @@ def quality_testing(chunk_type='256'):
     # Calculate accuracy (percentage of correct answers)
     accuracy = (chatbot_predictions == ground_truth_answers).mean()
 
-    print(f"Accuracy: {accuracy:.4f} for chunking type {chunk_type}")  # Output the accuracy
-    logging.info(f"Accuracy: {accuracy:.4f} for chunking type {chunk_type} which takes total cost of ${total_cost:.6f}")
+    print(f"Accuracy: {accuracy:.4f} for chunking type {chunk_type} with the average time of {avg_retrieval_time}")  # Output the accuracy
+    logging.info(f"Accuracy: {accuracy:.4f} for chunking type {chunk_type} which takes total cost of ${total_cost:.6f} with the average time of {avg_retrieval_time}")
     return
 
 # -----------------------------------MAIN-----------------------------------
@@ -795,5 +825,6 @@ if __name__ == '__main__':
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa',  required=True, type=str, default="qasper")
     parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus', type=str, default='256')
     parser.add_argument('--top_k', help='Top_k chunk to retrieve', type=int, default=5)
+    parser.add_argument('--retrieve', help="is retieval ?", action='store_true')
     args = parser.parse_args() 
     main(args)
