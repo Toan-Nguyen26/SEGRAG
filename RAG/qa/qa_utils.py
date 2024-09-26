@@ -85,9 +85,34 @@ def get_top_chunks(indices, document_store):
         top_chunks.append(chunk_info)
     return top_chunks
 
-def handle_multiple_vectors(query_embedding, index, document_store, top_k):
+def handle_multiple_vectors(indices, document_store, top_k):
     # Search all vectors
-    D, I = index.search(query_embedding.reshape(1, -1), index.ntotal)
+    top_chunks = []
+    seen_chunks = set()
+    for idx in indices[0]:
+        # Assuming document_store contains the relevant chunk text and metadata
+        # Get chunk info from the document store
+        chunk_text = document_store[idx]['chunk']
+        
+        # Check if the chunk already exists in top_chunks
+        if chunk_text in seen_chunks:
+            print(f"Skipping duplicate chunk: {chunk_text}")
+            continue  # Skip if the chunk already exists
+        chunk_info = {
+            'title': document_store[idx]['title'],
+            'doc_id': document_store[idx]['doc_id'],
+            'chunk': document_store[idx]['chunk'],
+            'cluster_embedding': document_store[idx]['cluster_embedding'],
+            'segment_embeddings': document_store[idx]['segment_embeddings']
+        }
+        seen_chunks.add(chunk_text)  # Mark this chunk as seen
+        top_chunks.append(chunk_info)
+        # Break if we've reached top_k
+        if len(top_chunks) >= top_k:
+            break
+
+    return top_chunks
+
     
     chunk_scores = {}
     current_index = 0
@@ -103,19 +128,17 @@ def handle_multiple_vectors(query_embedding, index, document_store, top_k):
 def ask_question_and_retrieve_chunks(question, index, document_store, top_k, is_mul_vector):
     query_embedding = encode_query(question)
     if is_mul_vector:
-        top_chunks = handle_multiple_vectors(query_embedding, index, document_store, top_k)
+        indices = search_faiss_index(query_embedding, index, 50)
+        top_chunks = handle_multiple_vectors(indices, document_store, top_k)
     else:
         indices = search_faiss_index(query_embedding, index, top_k)
         top_chunks = get_top_chunks(indices, document_store)
-    for chunk in top_chunks:
-        print(chunk)
     return top_chunks
 
 def generate_short_answer_from_chunks(question, chunks):
     # Create a prompt by concatenating the chunks
     chunk_text = " ".join([chunk['chunk'] for chunk in chunks])
     prompt = f"Based on the following information, answer the question in less than 100 tokens:\n\n{chunk_text}\n\nQuestion: {question}"
-    print(prompt)
     # Send the prompt to the API
     response = openai.ChatCompletion.create(
         model="gpt-4o-mini",  # You can use "gpt-4" if you have access to that model
