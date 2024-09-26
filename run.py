@@ -13,7 +13,7 @@ from tensorboard_logger import configure, log_value
 import os
 import sys
 from pathlib2 import Path
-from wiki_loader import WikipediaDataSet, InMemoryWikipediaDataSet
+from wiki_loader import WikipediaDataSet
 import accuracy
 import numpy as np
 from termcolor import colored
@@ -44,20 +44,6 @@ def softmax(x):
 def import_model(model_name):
     module = __import__('models.' + model_name, fromlist=['models'])
     return module.create()
-
-
-# def check_empty_data(data, paths, batch_index, logger, error_file='debug_error.txt'):
-#     if isinstance(data, list) and len(data) == 0:
-#         logger.warning(f"Empty data in batch {batch_index}, paths: {paths}")
-#         with open(error_file, 'a') as ef:
-#             ef.write(f"Batch {batch_index}\nPaths: {paths}\nError: Empty data\n\n")
-#         return True
-#     elif isinstance(data, torch.Tensor) and data.numel() == 0:
-#         logger.warning(f"Empty tensor in batch {batch_index}, paths: {paths}")
-#         with open(error_file, 'a') as ef:
-#             ef.write(f"Batch {batch_index}\nPaths: {paths}\nError: Empty tensor\n\n")
-#         return True
-#     return False
 
 
 class Accuracies(object):
@@ -194,6 +180,7 @@ def validate(model, args, epoch, dataset, logger):
 def test(model, args, epoch, dataset, logger, threshold):
     model.eval()
     with tqdm(desc='Testing', total=len(dataset)) as pbar:
+        segment_output_file = open('segment_output.txt', 'w')
         acc = accuracy.Accuracy()
         for i, (data, target, paths) in enumerate(dataset):
             if True:
@@ -221,6 +208,10 @@ def test(model, args, epoch, dataset, logger, threshold):
                         tt = np.append(t, [1])
 
                         acc.update(h, tt)
+
+                        segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k]}:\n')  # Include the file path
+                        segment_output_file.write(f'Segments: {h}\n')
+                        segment_output_file.write(f'Target Segments: {tt}\n\n')
 
                         current_idx = to_idx
 
@@ -270,12 +261,12 @@ def main(args):
 
     if not args.infer:
         if args.wiki:
-            dataset_path = Path(utils.config['half-wikidataset'])
+            dataset_path = Path(utils.config[args.path])
             train_dataset = WikipediaDataSet(dataset_path / 'train', word2vec=word2vec,
-                                             high_granularity=args.high_granularity)
-            dev_dataset = WikipediaDataSet(dataset_path / 'dev', word2vec=word2vec, high_granularity=args.high_granularity)
+                                             high_granularity=args.high_granularity, is_json=args.is_json, json_data_path=args.json_data_path)
+            dev_dataset = WikipediaDataSet(dataset_path / 'dev', word2vec=word2vec, high_granularity=args.high_granularity, is_json=args.is_json, json_data_path=args.json_data_path)
             test_dataset = WikipediaDataSet(dataset_path / 'test', word2vec=word2vec,
-                                            high_granularity=args.high_granularity)
+                                            high_granularity=args.high_granularity, is_json=args.is_json, json_data_path=args.json_data_path)
         else:
             dataset_path = utils.config['choidataset']
             train_dataset = ChoiDataset(dataset_path, word2vec)
@@ -354,5 +345,9 @@ if __name__ == '__main__':
     parser.add_argument('--high_granularity', help='Use high granularity for wikipedia dataset segmentation', action='store_true')
     parser.add_argument('--infer', help='inference_dir', type=str)
     parser.add_argument('--early_stops', help='Help to stop training early after a certain amounts of epochs does not improt p_k', type=int)
+    parser.add_argument('--path', help='Path for the datasets', type=str, default='datasets')
+    parser.add_argument('--is_json', help='Are we loading a json_file for RAG', type=bool, default=False)
+    parser.add_argument('--json_data_path', help='Path to the json data file', type=str)
+    
 
     main(parser.parse_args())

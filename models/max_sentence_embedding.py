@@ -81,6 +81,9 @@ class Model(nn.Module):
         # We have two labels
         self.h2s = nn.Linear(hidden * 2, 2)
 
+        # Now we have 3 labels
+        self.h3s = nn.Linear(hidden * 2, 3)
+
         self.num_layers = num_layers
         self.hidden = hidden
 
