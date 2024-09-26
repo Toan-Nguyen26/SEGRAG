@@ -290,9 +290,11 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     if args.is_cluster == True:    
         with open(output_ids_path, 'r', encoding='utf-8') as id_file:
             loaded_data = json.load(id_file)
-        loaded_data, embeddings, total_chunk_size, total_chunks_count = cluster_segment(loaded_data, embeddings, args.max_file_size, args.k)
+        loaded_data, embeddings, total_chunk_size, total_chunks_count = cluster_segment(loaded_data, embeddings, args.max_file_size, args.k, args.is_mul_vector)
         with open(output_ids_path, 'w', encoding='utf-8') as id_file:
             json.dump(loaded_data, id_file, ensure_ascii=False, indent=4)
+        # Since we have multiple vectors, original loaded_data text should be replace with the cluster text
+        # Maybe an id that goes along with it to indetify while indexong
 
     # Convert embeddings to a numpy array
     embeddings = np.array(embeddings)
@@ -316,7 +318,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
 def main(args):
     if args.dataset:
         if args.max_file_size != 0:
-            json_directory_path = f'data_256_512/{args.dataset}/individual_documents_2048'
+            json_directory_path = f'{args.original_data}/{args.dataset}/individual_documents_2048'
         else:
             json_directory_path = f'data/{args.dataset}/individual_documents'
         # embedding_testing()
@@ -334,6 +336,8 @@ if __name__ == '__main__':
     parser.add_argument('--max_file_size', help='Output path for the embeddings', type=int, default=0)
     parser.add_argument('--k', help='k variable', type=float, default=0.5)
     parser.add_argument('--is_cluster', help='Enable clustering of segments', action='store_true')
+    parser.add_argument('--is_mul_vector', help='Enable mulitple vectors', action='store_true')
+    parser.add_argument('--original_data', help='Enable data path', type=str, default='data_512_1024') 
     args = parser.parse_args() 
     main(args)
 

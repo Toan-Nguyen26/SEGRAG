@@ -215,6 +215,69 @@ def compute_segment_relatedness(segment1, segment2, sentence_embeddings):
     
     return total_relatedness / (len(segment1) * len(segment2))
 
+def process_json_with_merged_segments_mul_vector(grouped_data, loaded_data, list_embeddings, max_chunk_size, k_value, threshold=0.5):
+    total_chunk_size = 0
+    total_chunks_count = 0
+    unique_id = len(list_embeddings)
+    mul_flag = 0
+    for doc_id, doc_data in grouped_data.items():
+        embeddings = [doc_data[chunk]['embedding'] for chunk in doc_data]
+        first_chunk_key = next(iter(doc_data))
+        title = doc_data[first_chunk_key]["title"]
+        id = doc_data[first_chunk_key]["doc_id"]
+        print(f"\nEmbedding document {doc_id} with {len(embeddings)} chunks")
+        
+        if len(embeddings) == 1:
+            continue  # Skip documents with only one chunk
+
+        relatedness_graph, all_segments = create_relatedness_graph_soft(embeddings, k_value)
+        maximal_cliques = find_maximal_cliques_with_pivot(relatedness_graph)
+        initial_segments = create_initial_segments(maximal_cliques, all_segments)
+        merged_segments = merge_segments(initial_segments, maximal_cliques)
+
+        for segment in merged_segments:
+            current_chunk = []
+            total_length = 0
+            chunk_ids = []
+            
+            for chunk_id in segment:
+                chunk_text = doc_data[chunk_id]['chunk']
+                chunk_length = doc_data[chunk_id]['chunk_size']
+                current_chunk.append(chunk_text)
+                total_length += chunk_length
+                chunk_ids.append(chunk_id)
+            
+            concatenated_chunk = " ".join(current_chunk)
+            
+            if len(segment) > 1:  # Only process clusters with more than one segment
+                new_embedding = model.encode(concatenated_chunk)
+                
+                # Update the original segments in loaded_data
+                for chunk_id in chunk_ids:
+                    for item in loaded_data:
+                        if item['doc_id'] == id and item['chunk_id'] == chunk_id:
+                            item['chunk'] = concatenated_chunk
+                            item['chunk_size'] = total_length
+                            item['mul_flag'] = mul_flag
+                            break
+                
+                # Add the new cluster to loaded_data and list_embeddings
+                loaded_data.append({
+                    'chunk_id': unique_id,
+                    'doc_id': id,
+                    'title': title,
+                    'chunk': concatenated_chunk,
+                    'chunk_size': total_length,
+                    'embedding': new_embedding.tolist(),
+                    'mul_flag': mul_flag
+                })
+                list_embeddings.append(new_embedding)
+                unique_id += 1
+                mul_flag += 1
+                total_chunk_size += total_length
+                total_chunks_count += 1
+
+    return loaded_data, list_embeddings, total_chunk_size, total_chunks_count
 
 def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings, max_chunk_size, k_value, threshold=0.5):
     final_data = []
@@ -230,16 +293,6 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         print(f"Embedding document {doc_id} with {len(embeddings)} chunks")
         # If the document has only one chunk, no need to calculate similarities
         if len(embeddings) == 1:
-            # Treat this single chunk as its own segment
-            # chunk_id = list(doc_data.keys())[0]  # Get the single chunk's ID            
-            # merged_results.append({
-            #     'chunk_id': doc_data[chunk_id]['chunk_id'],
-            #     'doc_id': id,
-            #     'title': title,
-            #     'chunk': doc_data[chunk_id]['chunk'],
-            #     'chunk_size': doc_data[chunk_id]['chunk_size'],
-            #     "embedding": doc_data[chunk_id]['embedding'].tolist()
-            # })
             continue  # Skip to the next document
 
         # Step 1: Create relatedness graph based on embeddings and threshold
@@ -261,9 +314,6 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         total_embeddings = []
         total_data = []
         for segment in merged_segments:
-            # print(segment)
-            # if len(segment) == 1:
-            #     continue 
             current_chunk = []  # To hold concatenated text chunks
             current_embedding_list = []  # To hold embeddings for averaging
             total_length = 0  # Initialize total length
@@ -312,9 +362,12 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         total_embeddings = []
     return final_data, final_embeddings, total_chunk_size, total_chunks_count # type: ignore
 
-def cluster_segment(loaded_data, embeddings, max_chunk_size, k_value):
+def cluster_segment(loaded_data, embeddings, max_chunk_size, k_value, is_mul_vector):
     grouped_data = group_chunks_by_doc_and_chunk_id(loaded_data)
-    return process_json_with_merged_segments(grouped_data, loaded_data,  embeddings, max_chunk_size, k_value)
+    if is_mul_vector == False:
+        return process_json_with_merged_segments(grouped_data, loaded_data,  embeddings, max_chunk_size, k_value)
+    else:
+        return process_json_with_merged_segments_mul_vector(grouped_data, loaded_data,  embeddings, max_chunk_size, k_value)
 
 # Example usage
 if __name__ == "__main__":
