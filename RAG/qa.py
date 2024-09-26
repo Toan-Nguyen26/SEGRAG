@@ -649,7 +649,7 @@ def qasper_testing(chunk_type='256'):
             golden_answers = qas['answers']
             # Start measuring retrieval time
             start_time = time.time()
-            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
+            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
             # indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
             # top_chunks = get_top_chunks(indicies, document_store)
             if args.retrieve:
@@ -702,7 +702,7 @@ def narrativeqa_testing(chunk_type='256'):
             question = qas['question']
             golden_answers = qas['answers']
             start_time = time.time()
-            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
+            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
             # indicies = indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
             # top_chunks = get_top_chunks(indicies, document_store)
             if args.retrieve:
@@ -777,7 +777,7 @@ def quality_testing(chunk_type='256'):
             answer_choices = qas['context']
             golden_answer = qas['answers']
             start_time = time.time()
-            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k)
+            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
             if args.retrieve:
                 retrieval_time = time.time() - start_time
                 print(f"Current retrieval time {retrieval_time}")
@@ -826,5 +826,6 @@ if __name__ == '__main__':
     parser.add_argument('--chunk_type', help='What is the chunking strategy: 256, 512, seg, segclus', type=str, default='256')
     parser.add_argument('--top_k', help='Top_k chunk to retrieve', type=int, default=5)
     parser.add_argument('--retrieve', help="is retieval ?", action='store_true')
+    parser.add_argument('--is_mul_vector', help="is retieval ?", action='store_true')   
     args = parser.parse_args() 
     main(args)

@@ -79,15 +79,34 @@ def get_top_chunks(indices, document_store):
             'title': document_store[idx]['title'],
             'doc_id': document_store[idx]['doc_id'],
             'chunk': document_store[idx]['chunk'],
-            'embedding': document_store[idx]['embedding']
+            'cluster_embedding': document_store[idx]['cluster_embedding'],
+            'segment_embeddings': document_store[idx]['segment_embeddings']
         }
         top_chunks.append(chunk_info)
     return top_chunks
 
-def ask_question_and_retrieve_chunks(question, index, document_store, top_k):
+def handle_multiple_vectors(query_embedding, index, document_store, top_k):
+    # Search all vectors
+    D, I = index.search(query_embedding.reshape(1, -1), index.ntotal)
+    
+    chunk_scores = {}
+    current_index = 0
+    for chunk in document_store:
+        vector_count = chunk['vector_count']
+        chunk_scores[chunk['chunk_id']] = max(D[0][current_index:current_index + vector_count])
+        current_index += vector_count
+
+    # Sort chunks by their highest scores and get top_k
+    top_chunk_ids = sorted(chunk_scores, key=chunk_scores.get, reverse=True)[:top_k]
+    return [chunk for chunk in document_store if chunk['chunk_id'] in top_chunk_ids]
+
+def ask_question_and_retrieve_chunks(question, index, document_store, top_k, is_mul_vector):
     query_embedding = encode_query(question)
-    indices = search_faiss_index(query_embedding, index, top_k)
-    top_chunks = get_top_chunks(indices, document_store)
+    if is_mul_vector:
+        top_chunks = handle_multiple_vectors(query_embedding, index, document_store, top_k)
+    else:
+        indices = search_faiss_index(query_embedding, index, top_k)
+        top_chunks = get_top_chunks(indices, document_store)
     return top_chunks
 
 def generate_short_answer_from_chunks(question, chunks):

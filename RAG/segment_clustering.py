@@ -166,7 +166,7 @@ def merge_single_sentence_segments_in_place(total_data, total_embeddings):
 
         # Check if the segment is a single sentence
         if len(sentences) == 1:
-            
+            print(f"Segment {i} is a single sentence")
             single_embedding = total_embeddings[i]
 
             # Compute similarity with the previous and next segments
@@ -187,15 +187,17 @@ def merge_single_sentence_segments_in_place(total_data, total_embeddings):
                 total_data[i - 1]['chunk'] += " " + total_data[i]['chunk']
                 total_data[i - 1]['chunk_size'] += total_data[i]['chunk_size']
                 total_embeddings[i - 1] = (total_embeddings[i - 1] + total_embeddings[i]) / 2
-                total_data[i + 1]['embedding'] = total_embeddings[i + 1].tolist()
+                total_data[i - 1]['embedding'] = total_embeddings[i - 1].tolist()
+                total_data[i - 1]['cluster_embedding'].append(total_embeddings[i])
                 del total_data[i]
                 del total_embeddings[i]
                 i -= 1  # Stay at the same index to check for further merges
-            elif i < len(total_data) - 1:
-                total_data[i + 1]['chunk'] = total_data[i]['chunk'] + " " + total_data[i + 1]['chunk']
+            elif similarity_with_prev < similarity_with_next and i < 0:
+                total_data[i + 1]['chunk'] += " " + total_data[i]['chunk']
                 total_data[i + 1]['chunk_size'] += total_data[i]['chunk_size']
                 total_embeddings[i + 1] = (total_embeddings[i] + total_embeddings[i + 1]) / 2
                 total_data[i + 1]['embedding'] = total_embeddings[i + 1].tolist()
+                total_data[i + 1]['cluster_embedding'].append(total_embeddings[i])
                 del total_data[i]
                 del total_embeddings[i]
             else:
@@ -261,9 +263,6 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         total_embeddings = []
         total_data = []
         for segment in merged_segments:
-            # print(segment)
-            # if len(segment) == 1:
-            #     continue 
             current_chunk = []  # To hold concatenated text chunks
             current_embedding_list = []  # To hold embeddings for averaging
             total_length = 0  # Initialize total length
@@ -281,7 +280,7 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
             # Add the last segment if it hasn't been added yet
             if current_chunk:
                 concatenated_chunk = " ".join(current_chunk)
-                embedding = model.encode(concatenated_chunk)
+                cluster_embedding = model.encode(concatenated_chunk)
                 # embedding = np.mean(current_embedding_list, axis=0)
                 total_data.append({
                     'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
@@ -289,11 +288,13 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                     'title': title,
                     'chunk': concatenated_chunk,
                     'chunk_size': total_length,
-                    "embedding": embedding.tolist()
+                    "cluster_embedding": cluster_embedding.tolist(),
+                    'segment_embeddings': current_embedding_list
                 })
                 new_chunk_id += 1
                 added_time = 0
-                total_embeddings.append(embedding)
+                current_embedding_list = []
+                total_embeddings.append(cluster_embedding)
         item1, item2 = merge_single_sentence_segments_in_place(total_data, total_embeddings)
         # handle sittuation where only a sentnece is a segment
         for i in range(len(item1)):
@@ -305,7 +306,8 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                 'title': item1[i]['title'],
                 'chunk': item1[i]['chunk'],
                 'chunk_size': item1[i]['chunk_size'],
-                'embedding': item1[i]['embedding']
+                'embedding': item1[i]['embedding'],
+                'cluster_embedding': item1[i]['cluster_embedding']
             })
             final_embeddings.append(item2[i])
         total_data = []
