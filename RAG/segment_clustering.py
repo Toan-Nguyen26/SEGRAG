@@ -187,8 +187,8 @@ def merge_single_sentence_segments_in_place(total_data, total_embeddings):
                 total_data[i - 1]['chunk'] += " " + total_data[i]['chunk']
                 total_data[i - 1]['chunk_size'] += total_data[i]['chunk_size']
                 total_embeddings[i - 1] = (total_embeddings[i - 1] + total_embeddings[i]) / 2
-                total_data[i - 1]['embedding'] = total_embeddings[i - 1].tolist()
-                total_data[i - 1]['cluster_embedding'].append(total_embeddings[i])
+                total_data[i - 1]['cluster_embedding'] = total_embeddings[i - 1].tolist()
+                total_data[i - 1]['segment_embeddings'].extend(total_data[i]['segment_embeddings'])
                 del total_data[i]
                 del total_embeddings[i]
                 i -= 1  # Stay at the same index to check for further merges
@@ -196,8 +196,8 @@ def merge_single_sentence_segments_in_place(total_data, total_embeddings):
                 total_data[i + 1]['chunk'] += " " + total_data[i]['chunk']
                 total_data[i + 1]['chunk_size'] += total_data[i]['chunk_size']
                 total_embeddings[i + 1] = (total_embeddings[i] + total_embeddings[i + 1]) / 2
-                total_data[i + 1]['embedding'] = total_embeddings[i + 1].tolist()
-                total_data[i + 1]['cluster_embedding'].append(total_embeddings[i])
+                total_data[i + 1]['cluster_embedding'] = total_embeddings[i + 1].tolist()
+                total_data[i + 1]['segment_embeddings'] = total_data[i]['segment_embeddings'] + total_data[i + 1]['segment_embeddings']
                 del total_data[i]
                 del total_embeddings[i]
             else:
@@ -223,6 +223,7 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
     final_embeddings = []
     total_chunk_size = 0
     total_chunks_count = 0
+    new_chunk_id = len(list_embeddings) + 1
     for doc_id, doc_data in grouped_data.items():
         embeddings = [doc_data[chunk]['embedding'] for chunk in doc_data]
         first_chunk_key = next(iter(doc_data))
@@ -232,16 +233,6 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         print(f"Embedding document {doc_id} with {len(embeddings)} chunks")
         # If the document has only one chunk, no need to calculate similarities
         if len(embeddings) == 1:
-            # Treat this single chunk as its own segment
-            # chunk_id = list(doc_data.keys())[0]  # Get the single chunk's ID            
-            # merged_results.append({
-            #     'chunk_id': doc_data[chunk_id]['chunk_id'],
-            #     'doc_id': id,
-            #     'title': title,
-            #     'chunk': doc_data[chunk_id]['chunk'],
-            #     'chunk_size': doc_data[chunk_id]['chunk_size'],
-            #     "embedding": doc_data[chunk_id]['embedding'].tolist()
-            # })
             continue  # Skip to the next document
 
         # Step 1: Create relatedness graph based on embeddings and threshold
@@ -255,9 +246,6 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
 
         # Step 4: Merge segments into bigger segments
         merged_segments = merge_segments(initial_segments, maximal_cliques)
-
-        # new_chunk_id = len(embeddings)+1  
-        new_chunk_id = 1
 
         added_time = 0
         total_embeddings = []
@@ -289,7 +277,7 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                     'chunk': concatenated_chunk,
                     'chunk_size': total_length,
                     "cluster_embedding": cluster_embedding.tolist(),
-                    'segment_embeddings': current_embedding_list
+                    "segment_embeddings": [emb.tolist() for emb in current_embedding_list]  # Convert to list of lists
                 })
                 new_chunk_id += 1
                 added_time = 0
@@ -301,12 +289,12 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
             total_chunk_size += item1[i]['chunk_size']
             total_chunks_count += 1
             final_data.append({
-                'chunk_id': i + 1,
+                'chunk_id': item1[i]['chunk_id'],
                 'doc_id': item1[i]['doc_id'],
                 'title': item1[i]['title'],
                 'chunk': item1[i]['chunk'],
                 'chunk_size': item1[i]['chunk_size'],
-                'embedding': item1[i]['embedding'],
+                'segment_embeddings': item1[i]['segment_embeddings'],
                 'cluster_embedding': item1[i]['cluster_embedding']
             })
             final_embeddings.append(item2[i])

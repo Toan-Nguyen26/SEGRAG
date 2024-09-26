@@ -107,6 +107,8 @@ def ask_question_and_retrieve_chunks(question, index, document_store, top_k, is_
     else:
         indices = search_faiss_index(query_embedding, index, top_k)
         top_chunks = get_top_chunks(indices, document_store)
+    for chunk in top_chunks:
+        print(chunk)
     return top_chunks
 
 def generate_short_answer_from_chunks(question, chunks):
