@@ -235,7 +235,7 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
 
     total_chunk_size = 0  # Variable to track total size of all chunks
     total_chunks_count = 0  # Variable to track total number of chunks
-    chunk_id = 1
+
     # Iterate over each JSON file in the directory
     for json_filename in os.listdir(json_directory_path):
         if json_filename.endswith(".json"):
@@ -256,8 +256,11 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
                 text_chunks = semantic_chunking(content, tokenizer)
             else:
                 text_chunks = chunk_text_by_segment(content, segmented_sentences, tokenizer, title, doc_id)
+            # text_chunks = chunk_text_by_tokens(content, chunk_size, tokenizer)
+            # text_chunks = split_text_into_segmented_chunks_at_word_level(num_sentences, content, max_chunk_size=chunk_size, tokenizer=tokenizer, segmented_sentences=segmented_sentences)
             print(f"Processing document {doc_id} with {len(text_chunks)} chunks")
             # Iterate through each chunk and its size
+            chunk_id = 1
             for chunk_text, c_size in text_chunks:
                 # Encode the chunk
                 total_chunk_size += c_size
@@ -291,24 +294,8 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
         with open(output_ids_path, 'w', encoding='utf-8') as id_file:
             json.dump(loaded_data, id_file, ensure_ascii=False, indent=4)
 
-    if args.is_mul_vector == True:
-        flat_embeddings = []
-        for chunk in loaded_data:
-            chunk_embeddings = [np.array(chunk['cluster_embedding'], dtype=np.float32)] + [np.array(emb, dtype=np.float32) for emb in chunk['segment_embeddings']]
-            if len(chunk_embeddings) != 2:
-                flat_embeddings.extend(chunk_embeddings)
-                chunk['vector_count'] = len(chunk_embeddings)
-            else:
-                flat_embeddings.append(np.array(chunk['cluster_embedding'], dtype=np.float32))
-                chunk['vector_count'] = 1
-            print(f"Chunk {chunk['chunk_id']} has {chunk['vector_count']} vectors")
-
-        embeddings = np.array(flat_embeddings, dtype=np.float32)
-    else:
-        embeddings = np.array(embeddings, dtype=np.float32)
-
-    # Ensure embeddings are contiguous in memory
-    embeddings = np.ascontiguousarray(embeddings)
+    # Convert embeddings to a numpy array
+    embeddings = np.array(embeddings)
 
     # Create a FAISS index
     embedding_dim = embeddings.shape[1]  # Dimension of the embeddings
@@ -318,9 +305,6 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
     # Save the FAISS index
     os.makedirs(os.path.dirname(output_faiss_path), exist_ok=True)
     faiss.write_index(index, output_faiss_path)
-
-    with open(output_ids_path, 'w', encoding='utf-8') as id_file:
-        json.dump(loaded_data, id_file, ensure_ascii=False, indent=4)
 
 
     logging.info(f"Total number of chunks for chunk type {args.max_file_size} the dataset {args.dataset} is: {len(embeddings)}")
@@ -332,9 +316,9 @@ def create_segmendtaion_faiss_index_from_directory(json_directory_path,
 def main(args):
     if args.dataset:
         if args.max_file_size != 0:
-            json_directory_path = f'{args.original_data}/{args.dataset}/individual_documents_2048'
+            json_directory_path = f'data_256_512/{args.dataset}/individual_documents_2048'
         else:
-            json_directory_path = f'{args.original_data}/{args.dataset}/individual_documents'
+            json_directory_path = f'data/{args.dataset}/individual_documents'
         # embedding_testing()
         logging.basicConfig(filename=f'{args.dataset}_{args.chunk_type}_embedding.txt', level=logging.INFO)
         create_segmendtaion_faiss_index_from_directory(json_directory_path=json_directory_path, 
@@ -350,8 +334,6 @@ if __name__ == '__main__':
     parser.add_argument('--max_file_size', help='Output path for the embeddings', type=int, default=0)
     parser.add_argument('--k', help='k variable', type=float, default=0.5)
     parser.add_argument('--is_cluster', help='Enable clustering of segments', action='store_true')
-    parser.add_argument('--is_mul_vector', help='Enable multiple vectors', action='store_true')
-    parser.add_argument('--original_data', help='Enable data path', type=str, default='data_512_1024') 
     args = parser.parse_args() 
     main(args)
 

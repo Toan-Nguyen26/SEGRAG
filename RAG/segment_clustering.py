@@ -166,7 +166,7 @@ def merge_single_sentence_segments_in_place(total_data, total_embeddings):
 
         # Check if the segment is a single sentence
         if len(sentences) == 1:
-            print(f"Segment {i} is a single sentence")
+            
             single_embedding = total_embeddings[i]
 
             # Compute similarity with the previous and next segments
@@ -187,17 +187,15 @@ def merge_single_sentence_segments_in_place(total_data, total_embeddings):
                 total_data[i - 1]['chunk'] += " " + total_data[i]['chunk']
                 total_data[i - 1]['chunk_size'] += total_data[i]['chunk_size']
                 total_embeddings[i - 1] = (total_embeddings[i - 1] + total_embeddings[i]) / 2
-                total_data[i - 1]['cluster_embedding'] = total_embeddings[i - 1].tolist()
-                total_data[i - 1]['segment_embeddings'].extend(total_data[i]['segment_embeddings'])
+                total_data[i + 1]['embedding'] = total_embeddings[i + 1].tolist()
                 del total_data[i]
                 del total_embeddings[i]
                 i -= 1  # Stay at the same index to check for further merges
-            elif similarity_with_prev < similarity_with_next and i < 0:
-                total_data[i + 1]['chunk'] += " " + total_data[i]['chunk']
+            elif i < len(total_data) - 1:
+                total_data[i + 1]['chunk'] = total_data[i]['chunk'] + " " + total_data[i + 1]['chunk']
                 total_data[i + 1]['chunk_size'] += total_data[i]['chunk_size']
                 total_embeddings[i + 1] = (total_embeddings[i] + total_embeddings[i + 1]) / 2
-                total_data[i + 1]['cluster_embedding'] = total_embeddings[i + 1].tolist()
-                total_data[i + 1]['segment_embeddings'] = total_data[i]['segment_embeddings'] + total_data[i + 1]['segment_embeddings']
+                total_data[i + 1]['embedding'] = total_embeddings[i + 1].tolist()
                 del total_data[i]
                 del total_embeddings[i]
             else:
@@ -223,7 +221,6 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
     final_embeddings = []
     total_chunk_size = 0
     total_chunks_count = 0
-    new_chunk_id = len(list_embeddings) + 1
     for doc_id, doc_data in grouped_data.items():
         embeddings = [doc_data[chunk]['embedding'] for chunk in doc_data]
         first_chunk_key = next(iter(doc_data))
@@ -233,6 +230,16 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         print(f"Embedding document {doc_id} with {len(embeddings)} chunks")
         # If the document has only one chunk, no need to calculate similarities
         if len(embeddings) == 1:
+            # Treat this single chunk as its own segment
+            # chunk_id = list(doc_data.keys())[0]  # Get the single chunk's ID            
+            # merged_results.append({
+            #     'chunk_id': doc_data[chunk_id]['chunk_id'],
+            #     'doc_id': id,
+            #     'title': title,
+            #     'chunk': doc_data[chunk_id]['chunk'],
+            #     'chunk_size': doc_data[chunk_id]['chunk_size'],
+            #     "embedding": doc_data[chunk_id]['embedding'].tolist()
+            # })
             continue  # Skip to the next document
 
         # Step 1: Create relatedness graph based on embeddings and threshold
@@ -247,10 +254,16 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
         # Step 4: Merge segments into bigger segments
         merged_segments = merge_segments(initial_segments, maximal_cliques)
 
+        # new_chunk_id = len(embeddings)+1  
+        new_chunk_id = 1
+
         added_time = 0
         total_embeddings = []
         total_data = []
         for segment in merged_segments:
+            # print(segment)
+            # if len(segment) == 1:
+            #     continue 
             current_chunk = []  # To hold concatenated text chunks
             current_embedding_list = []  # To hold embeddings for averaging
             total_length = 0  # Initialize total length
@@ -268,7 +281,7 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
             # Add the last segment if it hasn't been added yet
             if current_chunk:
                 concatenated_chunk = " ".join(current_chunk)
-                cluster_embedding = model.encode(concatenated_chunk)
+                embedding = model.encode(concatenated_chunk)
                 # embedding = np.mean(current_embedding_list, axis=0)
                 total_data.append({
                     'chunk_id': new_chunk_id,  # Use the first chunk ID of the segment
@@ -276,26 +289,23 @@ def process_json_with_merged_segments(grouped_data, loaded_data, list_embeddings
                     'title': title,
                     'chunk': concatenated_chunk,
                     'chunk_size': total_length,
-                    "cluster_embedding": cluster_embedding.tolist(),
-                    "segment_embeddings": [emb.tolist() for emb in current_embedding_list]  # Convert to list of lists
+                    "embedding": embedding.tolist()
                 })
                 new_chunk_id += 1
                 added_time = 0
-                current_embedding_list = []
-                total_embeddings.append(cluster_embedding)
+                total_embeddings.append(embedding)
         item1, item2 = merge_single_sentence_segments_in_place(total_data, total_embeddings)
         # handle sittuation where only a sentnece is a segment
         for i in range(len(item1)):
             total_chunk_size += item1[i]['chunk_size']
             total_chunks_count += 1
             final_data.append({
-                'chunk_id': item1[i]['chunk_id'],
+                'chunk_id': i + 1,
                 'doc_id': item1[i]['doc_id'],
                 'title': item1[i]['title'],
                 'chunk': item1[i]['chunk'],
                 'chunk_size': item1[i]['chunk_size'],
-                'segment_embeddings': item1[i]['segment_embeddings'],
-                'cluster_embedding': item1[i]['cluster_embedding']
+                'embedding': item1[i]['embedding']
             })
             final_embeddings.append(item2[i])
         total_data = []
@@ -350,4 +360,3 @@ if __name__ == "__main__":
     faiss.write_index(index, output_faiss_path)
     print(f"{len(final_embeddings)} chunks have been clustered and saved to {output_ids_path}")
     print(f"FAISS index and document chunk information have been saved to {output_faiss_path}")
-
