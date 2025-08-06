@@ -76,7 +76,6 @@ def get_gold_segments(path):
 def get_sub_folders_for_graphseg(folder):
     d = folder
     folders = [os.path.join(d, o) for o in os.listdir(d) if os.path.isdir(os.path.join(d, o))]
-    print folders
     return folders
 
 
@@ -101,8 +100,7 @@ def analyszie_folder(wiki_folder,xlsx_folder,isGraphseg, use_xlsx_sub_folders = 
         id = os.path.basename(file)
         file_name = id + ".xlsx" if not isGraphseg else id
         xlsx_file_paths = [os.path.join(xlsx_folder,file_name) for xlsx_folder in annotated_files_folders]
-        print str(xlsx_file_paths)
-        print str(file)
+
 
         for xlsx_file_path in xlsx_file_paths:
             if os.path.isfile(xlsx_file_path):
@@ -115,8 +113,6 @@ def analyszie_folder(wiki_folder,xlsx_folder,isGraphseg, use_xlsx_sub_folders = 
 
             gold_segments = get_gold_segments(file)
             if (tested_segments is not  None) and (len(tested_segments) != len(gold_segments)):
-                print "(len(tested_segments) != len(gold_segments))"
-                print "stop run"
                 return 1000,1000
             if tested_segments is not None :
                 acc.update(tested_segments,gold_segments)

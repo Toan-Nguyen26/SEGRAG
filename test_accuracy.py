@@ -18,11 +18,19 @@ from wiki_loader import WikipediaDataSet
 import accuracy
 from models import naive
 from timeit import default_timer as timer
+import random
+from transformers import AutoTokenizer
+# import nltk
+import matplotlib.pyplot as plt
 
+# Ensure you have the necessary NLTK data files
+# nltk.download('punkt')
 
-logger = utils.setup_logger(__name__, 'test_accuracy.log')
+logger  = None
 document = None
-
+json_file_path = None
+# Initialize the tokenizer
+tokenizer = AutoTokenizer.from_pretrained("BAAI/bge-m3", cache_dir='/path/to/local/cache')
 def softmax(x):
     max_each_row = np.max(x, axis=1, keepdims=True)
     exps = np.exp(x - max_each_row)
@@ -58,6 +66,59 @@ def close_file(file_path, document):
     print(f"Saved the updated document to {file_path}")
     return
 
+def adjust_segment_for_length(output_prob, token_lengths, max_chunk_size, threshold, scaling_factor_base):
+
+    segment_size = sum(token_lengths)
+    output_prob = np.array(output_prob)
+    if segment_size > max_chunk_size:
+        excess_ratio = segment_size / max_chunk_size
+        scaling_factor = scaling_factor_base * excess_ratio
+        scaled_probs = output_prob * scaling_factor
+        adjusted_segments = scaled_probs > threshold
+    else:
+        adjusted_segments = output_prob > threshold
+
+    return adjusted_segments
+
+def adjust_highest_segment_for_length(output_prob, token_lengths, max_chunk_size, threshold, scaling_factor_base):
+    segment_size = sum(token_lengths)
+    output_prob = np.array(output_prob)
+    
+    if segment_size > max_chunk_size:
+        # If the segment is too long, find the index of the highest probability
+        highest_prob_idx = np.argmax(output_prob)
+        
+        # Boost the highest probability to ensure it exceeds the threshold
+        if output_prob[highest_prob_idx] <= threshold:
+            # Increase only the highest probability by multiplying with the scaling factor
+            excess_ratio = segment_size / max_chunk_size
+            scaling_factor = scaling_factor_base * excess_ratio
+            output_prob[highest_prob_idx] *= 1000  # Boost the highest probability
+        print("buck")
+        # Adjust the segment decisions: only the highest probability will be boosted
+        adjusted_segments = output_prob > threshold
+    else:
+        # If the segment size is within limits, use the default segmentation
+        adjusted_segments = output_prob > threshold
+
+    return adjusted_segments
+
+def plot_segment_lengths(segment_lengths):
+    # Calculate the average token length for all segments
+    avg_token_length = sum(segment_lengths) / len(segment_lengths)
+    
+    # Plot the segment token lengths
+    plt.figure(figsize=(10, 5))
+    plt.plot(segment_lengths, marker='o', label='Segment Token Length')
+    plt.axhline(avg_token_length, color='r', linestyle='--', label=f'Average Token Length: {avg_token_length:.2f}')
+    plt.title('Token Lengths Per Segment')
+    plt.xlabel('Segment Number')
+    plt.ylabel('Segment Token Length')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+
 def main(args):
     start = timer()
 
@@ -65,7 +126,7 @@ def main(args):
 
     utils.read_config_file(args.config)
     utils.config.update(args.__dict__)
-
+    logger = utils.setup_logger(__name__, f'{args.dataset}_{args.max_chunk_size}_test_accuracy.log')
     logger.debug('Running with config %s', utils.config)
     print ('Running with threshold: ' + str(args.seg_threshold))
     preds_stats = utils.predictions_analysis()
@@ -85,12 +146,6 @@ def main(args):
             dataset_folders.append(args.wiki_folder)
         print('running on wikipedia')
     else:
-        # if (args.bySegLength):
-        #     dataset_folders = getSegmentsFolders(utils.config['choidataset'])
-        #     print('run on choi by segments length')
-        # else :
-        #     dataset_folders = [utils.config['choidataset']]
-        #     print('running on Choi')
         print('running on RAG dataset')
 
 
@@ -110,13 +165,13 @@ def main(args):
         
         if args.dataset:
             print('running on dataset: ', args.dataset)
-            if(args.dataset == 'squad'):
-                document = open_file("RAG\data\squad\concatenated_documents.json")
-                dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_file="RAG\data\squad\concatenated_documents.json")
-            elif(args.dataset == 'narrative_qa'):
-                json_file="RAG\\data\\narrativeqa\\concatenated_documents.json"
-                document = open_file(json_file)
-                dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_file=json_file)
+            # We're handling 512 tokens on avr
+            # if args.max_chunk_size == 1024:
+            json_file_path = f"RAG\data_512_1024\{args.dataset}\individual_documents_2048"
+            # # We're handline 1024 on avarage
+            # else:
+            #     json_file_path = f"RAG\data\{args.dataset}\individual_documents_2048"
+            dataset = WikipediaDataSet(dataset_path, word2vec, high_granularity=False, is_json=True, json_data_path=json_file_path)
         elif args.wiki:
             if (args.wiki_folder):
                 dataset = WikipediaDataSet(dataset_path, word2vec, folder=True, high_granularity=False)
@@ -128,58 +183,145 @@ def main(args):
         dl = DataLoader(dataset, batch_size=args.bs, collate_fn=collate_fn, shuffle=False)
 
 
-
         with tqdm(desc='Testing', total=len(dl)) as pbar:
             total_accurate = 0
             total_count = 0
             total_loss = 0
             acc =  accuracy.Accuracy()
 
+            max_chunk_size = args.max_chunk_size
+            scaling_factor_base = args.scaling_factor_base
             # Add this line at the start of the main function to open a file for writing segment details
-            segment_output_file = open('segment_output.txt', 'w')
-
+            segment_output_file = open(f'{args.dataset}_segment_output.txt', 'w')
+            
+            accumulated_probs = []  # Accumulate probabilities for sentences in a segment
+            segment_token_lengths = []
             for i, (data, targets, paths) in enumerate(dl):
                 if i == args.stop_after:
                     break
-
+                
                 pbar.update()
                 output = model(data)
                 targets_var = Variable(maybe_cuda(torch.cat(targets, 0), args.cuda), requires_grad=False)
                 batch_loss = 0
                 output_prob = softmax(output.data.cpu().numpy())
-                output_seg = output_prob[:, 1] > args.seg_threshold
+                # use for narrativeqa
+                output_probability = output_prob[:, 1]
+                if args.dataset == 'qasper':
+                    print('qasper')
+                    # seg_threshold =  args.seg_threshold
+                    seg_threshold = np.percentile(output_probability, 85)
+                elif args.dataset == 'narrativeqa':
+                    print('narrativeqa')
+                    # Use for qasper
+                    seg_threshold = np.percentile(output_probability, 97)
+                else:
+                    print("quality")
+                    seg_threshold = np.percentile(output_probability, 93)
+                # print(seg_threshold)
+                # output_seg = output_probability > args.seg_threshold
+                output_seg = output_probability > seg_threshold
                 target_seg = targets_var.data.cpu().numpy()
                 batch_accurate = (output_seg == target_seg).sum()
                 total_accurate += batch_accurate
                 total_count += len(target_seg)
                 total_loss += batch_loss
                 preds_stats.add(output_seg,target_seg)
-
                 current_target_idx = 0
                 for k, t in enumerate(targets):
-                    document_sentence_count = len(t)
+                    document_sentence_count = len(t)          
                     sentences_length = [s.size()[0] for s in data[k]] if args.calc_word else None
                     to_idx = int(current_target_idx + document_sentence_count)
                     h = output_seg[current_target_idx: to_idx]
-                    # hypothesis and targets are missing classification of last sentence, and therefore we will add
-                    # 1 for both
                     h = np.append(h, [1])
-                    t = np.append(t.cpu().numpy(), [1])
+                    segment_output_file.write(f'original Segments: {h}\n')
+                    # =================================================================
+                    accumulated_token_lengths = []
+                    accumulated_probs = []
+                    start_idx = 0  # Track the start of the current segment
+                    content = paths[k][1]
+                    current_segment_token_length = 0
 
+                    for i in range(len(h) - 1):
+                        sentence = content[i]
+                        sentence_length = len(tokenizer.encode(sentence, truncation=True))
+                        current_segment_token_length += sentence_length
+                        accumulated_token_lengths.append(sentence_length)
+                        accumulated_probs.append(output_probability[i])
+
+                        # If we encounter a `1` (end of a segment)
+                        if h[i] == 1:
+                            # segment_token_lengths.append(current_segment_token_length)
+                            # print(f"Segment {len(segment_token_lengths)} token length: {current_segment_token_length}")
+                            
+                            # Check if the accumulated segment is too long
+                            if sum(accumulated_token_lengths) > max_chunk_size:
+                                # Adjust the segmentation for the current segment
+                                adjusted_segments = adjust_highest_segment_for_length(
+                                    accumulated_probs, 
+                                    accumulated_token_lengths, 
+                                    max_chunk_size, 
+                                    seg_threshold, 
+                                    scaling_factor_base
+                                )
+                                h[start_idx:i + 1] = np.logical_or(h[start_idx:i + 1], adjusted_segments)
+                                segment_output_file.write(f'New Segments: {h}\n')
+                            # Reset accumulators for the next segment
+                            current_segment_token_length = 0
+                            accumulated_token_lengths = []
+                            accumulated_probs = []
+                            start_idx = i + 1 
+
+                    for i in range(len(h) - 1):
+                        sentence = content[i]
+                        sentence_length = len(tokenizer.encode(sentence, truncation=True))
+                        current_segment_token_length += sentence_length
+
+                        # If we encounter a `1` (end of a segment)
+                        if h[i] == 1:
+                            segment_token_lengths.append(current_segment_token_length)
+                            print(f"Segment {len(segment_token_lengths)} token length: {current_segment_token_length}")
+                            
+                            # Check if the accumulated segment is too long
+                            # if sum(accumulated_token_lengths) > max_chunk_size:
+                                # Adjust the segmentation for the current segment
+                                # adjusted_segments = adjust_highest_segment_for_length(
+                                #     accumulated_probs, 
+                                #     accumulated_token_lengths, 
+                                #     max_chunk_size, 
+                                #     seg_threshold, 
+                                #     scaling_factor_base
+                                # )
+                                # h[start_idx:i + 1] = np.logical_or(h[start_idx:i + 1], adjusted_segments)
+                                # segment_output_file.write(f'New Segments: {h}\n')
+                            # Reset accumulators for the next segment
+                            current_segment_token_length = 0
+                            accumulated_token_lengths = []
+                            accumulated_probs = []
+                            start_idx = i + 1 
+                    # =================================================================
+                    t = np.append(t.cpu().numpy(), [1])
                     acc.update(h,t, sentences_length=sentences_length)
                     # Update the segmented_sentences field in the document JSON file
                     if args.dataset:
-                        for doc in document:
-                            if doc['id'] == paths[k]:
-                                doc['segmented_sentences'] = h.tolist()
+                        for file_name in os.listdir(json_file_path):
+                           if file_name.endswith('.json') and file_name[:-5] == str(paths[k][0]):
+                                file_path = os.path.join(json_file_path, file_name)
+                                with open(file_path, 'r', encoding='utf-8') as json_file:
+                                    data = json.load(json_file)
+                                data['segmented_sentences'] = h.tolist()
+                                with open(file_path, 'w', encoding='utf-8') as json_file:
+                                    json.dump(data, json_file, ensure_ascii=False, indent=4)
                                 break
 
                     # Add this block to log or write out the segment details
                     # Add this block to log or write out the segment details along with the corresponding file path
-                    segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k]}:\n')  # Include the file path
-                    segment_output_file.write(f'Segments: {h}\n')
-                    segment_output_file.write(f'Target Segments: {t}\n\n')
-
+                    top_5_values = np.sort(output_probability)[-5:]
+                    lowest_value = np.min(output_probability)
+                    segment_output_file.write(f'Top 5 value: {top_5_values}\n')
+                    segment_output_file.write(f'Lowest value: {lowest_value}\n')
+                    segment_output_file.write(f'Batch {i}, Document {k}, File Path: {paths[k][0]}:\n')  # Include the file path
+                    # segment_output_file.write(f'Target Segments: {t}\n\n')
 
                     current_target_idx = to_idx
 
@@ -190,8 +332,6 @@ def main(args):
             segment_output_file.close()
 
         average_loss = total_loss / len(dl)
-        # print('Total accurate: ' + str(total_accurate))
-        # print('Total count: ' + str(total_count))
         average_accuracy = total_accurate / total_count
         calculated_pk, _ = acc.calc_accuracy()
 
@@ -200,13 +340,7 @@ def main(args):
         logger.info('Average accuracy: %s', average_accuracy)
         logger.info('Pk: {:.4}.'.format(calculated_pk))
         logger.info('F1: {:.4}.'.format(preds_stats.get_f1()))
-        if args.dataset:
-            print('running on dataset: ', args.dataset)
-            if(args.dataset == 'squad'):
-                close_file("RAG\data\squad\concatenated_documents.json", document)
-            elif(args.dataset == 'narrative_qa'):
-                close_file("RAG\data\narrativeqa\concatenated_documents.json", document)
-
+        plot_segment_lengths(segment_token_lengths)
 
         end = timer()
         print ('Seconds to execute to whole flow: ' + str(end - start))
@@ -228,6 +362,9 @@ if __name__ == '__main__':
     parser.add_argument('--seg_threshold', help='Threshold for binary classificetion', type=float, default=0.4)
     parser.add_argument('--calc_word', help='Whether to calc P_K by word', action='store_true')
     parser.add_argument('--dataset', help='whenever it is squad or narrative_qa', type=str, default=None)
-
-
+    parser.add_argument('--is_json', help='Are we loading a json_file for RAG', type=bool, default=False)
+    parser.add_argument('--min_range', help='Min percentile', type=bool, default=95)
+    parser.add_argument('--max_range', help='Max percentile', type=bool, default=98)
+    parser.add_argument('--max_chunk_size', help='Max chunk size', type=int, default=1024)
+    parser.add_argument('--scaling_factor_base', help='Scaling factor base', type=float, default=1.2)
     main(parser.parse_args())
