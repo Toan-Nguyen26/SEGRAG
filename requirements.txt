@@ -6,11 +6,17 @@ tqdm
 pathlib2
 segeval
 tensorboard_logger
-flask_wtf
-flask
+# flask_wtf
+# flask
 nltk
 pandas
-xlrd
+# xlrd
 xlsxwriter
 termcolor
-scipy==1.12.0
+# scipy==1.12.0
+spacy
+pathlib2
+torch 
+torchvision
+transformers
+matplotlib
