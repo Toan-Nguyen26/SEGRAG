@@ -344,7 +344,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_workers', help='How many workers to use for data loading', type=int, default=0)
     parser.add_argument('--high_granularity', help='Use high granularity for wikipedia dataset segmentation', action='store_true')
     parser.add_argument('--infer', help='inference_dir', type=str)
-    parser.add_argument('--early_stops', help='Help to stop training early after a certain amounts of epochs does not improt p_k', type=int)
+    parser.add_argument('--early_stops', help='Help to stop training early after a certain amounts of epochs does not improt p_k', type=int, default=3)
     parser.add_argument('--path', help='Path for the datasets', type=str, default='datasets')
     parser.add_argument('--is_json', help='Are we loading a json_file for RAG', type=bool, default=False)
     parser.add_argument('--json_data_path', help='Path to the json data file', type=str)
