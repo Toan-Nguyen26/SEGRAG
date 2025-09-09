@@ -1,5 +1,4 @@
-numpy>=2.0.0,<2.3.0
-scipy>=1.14.0
+numpy
 tensorflow
 gensim
 ipython
@@ -14,6 +13,7 @@ pandas
 # xlrd
 xlsxwriter
 termcolor
+scipy==1.11.0
 spacy
 pathlib2
 torch 
