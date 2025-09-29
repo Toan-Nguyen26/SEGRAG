@@ -239,7 +239,7 @@ def create_segmendtaion_faiss_index_from_jsonl(jsonl_file_path, output_faiss_pat
             sentences = doc['sentences']
             doc_id = doc.get('file', str(uuid.uuid4()))  # Use file as ID or generate UUID
             title = doc.get('title', 'Untitled')
-            predicted_labels = doc['predicted_labels']
+            # predicted_labels = doc['predicted_labels']
             content = " ".join(sentences)  # Reconstruct content from sentences
 
             # Split the text into smaller chunks based on chunking strategy
@@ -306,7 +306,7 @@ def create_segmendtaion_faiss_index_from_jsonl(jsonl_file_path, output_faiss_pat
 
 def main(args):
     if args.dataset:
-        jsonl_file_path = f'{args.original_data}.jsonl'
+        jsonl_file_path = f'{args.original_data}_{args.chunk_type}.jsonl'
         configure_logging(args.dataset, args.chunk_type)
         create_segmendtaion_faiss_index_from_jsonl(
             jsonl_file_path=jsonl_file_path,
