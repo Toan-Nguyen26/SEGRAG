@@ -16,6 +16,7 @@ import time
 from qa.narrativeqa.narrativeqa_helpers_function import narrativeqa_prompt_and_answer
 from qa.qasper.qasper_helpers_function import qasper_prompt_and_answer
 from qa.quality.quality_helpers_function import quality_prompt_and_answer
+from qa.vietnamese_law.vietnamese_law_helpers_function import vietnamese_law_prompt_and_answer
 from qa.qa_utils import bleu_smoothing, load_jsonl_file, load_faiss_index_and_document_store, compute_best_f1,encode_query, search_faiss_index, get_top_chunks, ask_question_and_retrieve_chunks, generate_short_answer_from_chunks, load_json_folder
 # Load environment variables from the .env file
 load_dotenv()
@@ -318,6 +319,72 @@ def quality_testing(chunk_type='256'):
     logging.info(f"Accuracy: {accuracy:.4f} for chunking type {chunk_type} which takes total cost of ${total_cost:.6f} with the average time of {avg_retrieval_time}")
     return
 
+def vietnamese_law_testing(chunk_type='256'):
+    """
+    Vietnamese legal Q&A testing - Multiple choice like Quality dataset
+    """
+    index, document_store = load_faiss_index_and_document_store(
+        json_file_path=f'data/{args.dataset}.json', 
+        faiss_index_path=f'data/{args.dataset}.index'
+    )
+    original_documents = load_jsonl_file(f'{args.dataset}.jsonl')
+    
+    accuracy = 0
+    ground_truth_answers = []
+    chatbot_predictions = []
+    total_cost = 0
+    num_qa = 0
+    total_retrieval_time = 0
+    
+    for doc in original_documents:
+        # Skip chapter entries (they have empty qas)
+        if not doc.get('qas'):
+            continue
+            
+        logging.info(f"Processing document: {doc['title']}")
+        
+        for qas in doc['qas']:
+            question = qas['question']
+            golden_answer = qas['answers'][0] if isinstance(qas['answers'], list) else qas['answers']
+            
+            start_time = time.time()
+            top_chunks = ask_question_and_retrieve_chunks(
+                question, index, document_store, args.top_k, args.is_mul_vector
+            )
+            
+            if args.retrieve:
+                retrieval_time = time.time() - start_time
+                print(f"Current retrieval time {retrieval_time}")
+                total_retrieval_time += retrieval_time
+            else:
+                # Call Vietnamese law helper (no answer_choices parameter needed)
+                chatbot_answer, estimated_cost = vietnamese_law_prompt_and_answer(
+                    top_chunks, question, client
+                )
+                chatbot_predictions.append(chatbot_answer)
+                ground_truth_answers.append(golden_answer)
+                total_cost += estimated_cost
+                
+                logging.info(f"Question: {question[:100]}... | Chatbot: {chatbot_answer} | Golden: {golden_answer}")
+            
+            num_qa += 1
+    
+    # Calculate metrics (same as Quality)
+    avg_retrieval_time = total_retrieval_time / num_qa if num_qa > 0 else 0
+    chatbot_predictions = np.array(chatbot_predictions)
+    ground_truth_answers = np.array(ground_truth_answers)
+    
+    logging.info(f"Chatbot predictions: {chatbot_predictions}")
+    logging.info(f"Ground truth answers: {ground_truth_answers}")
+    
+    # Calculate accuracy
+    accuracy = (chatbot_predictions == ground_truth_answers).mean()
+    
+    print(f"Accuracy: {accuracy:.4f} for chunking type {chunk_type} with the average time of {avg_retrieval_time}")
+    logging.info(f"Accuracy: {accuracy:.4f} for chunking type {chunk_type} which takes total cost of ${total_cost:.6f} with the average time of {avg_retrieval_time}")
+    
+    return
+
 # -----------------------------------MAIN-----------------------------------
 def main(args):
     logging.basicConfig(filename=f'{args.chunk_type}_{args.dataset}_experiment.txt', level=logging.INFO)
@@ -327,12 +394,12 @@ def main(args):
         narrativeqa_testing(chunk_type=args.chunk_type)
     elif args.dataset == 'quality':
         quality_testing(chunk_type=args.chunk_type)
+    elif args.dataset == 'vietnamese_law': 
+        vietnamese_law_testing(chunk_type=args.chunk_type)
     elif args.dataset == 'test':
         test_openai_api()
-    # elif args.dataset == 'qasper':
-    #     create_concantenated_documents_qasper_json(num_files=args.num_files)
     else:
-        raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'qasper' or 'narrativeqa' or 'quality'.")
+        raise ValueError(f"Invalid dataset: {args.dataset}. Please choose 'qasper', 'narrativeqa', 'quality', or 'vietnamese_law'.")
 
 if __name__ == '__main__':
     parser = ArgumentParser()
