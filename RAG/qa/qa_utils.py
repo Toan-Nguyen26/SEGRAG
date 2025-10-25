@@ -74,13 +74,14 @@ def search_faiss_index(query_embedding, index, top_k=5):
 def get_top_chunks(indices, document_store):
     top_chunks = []
     for idx in indices[0]:
+        chunk_data = document_store[idx]
         # Assuming document_store contains the relevant chunk text and metadata
         chunk_info = {
-            'title': document_store[idx]['title'],
-            'doc_id': document_store[idx]['doc_id'],
-            'chunk': document_store[idx]['chunk'],
-            'cluster_embedding': document_store[idx]['cluster_embedding'],
-            'segment_embeddings': document_store[idx]['segment_embeddings']
+            'title': chunk_data['title'],
+            'doc_id': chunk_data['doc_id'],
+            'chunk': chunk_data['chunk'],
+            'cluster_embedding': chunk_data.get('cluster_embedding', []), 
+            'segment_embeddings': chunk_data.get('segment_embeddings', [])
         }
         top_chunks.append(chunk_info)
     return top_chunks
@@ -168,3 +169,23 @@ def load_json_folder(folder_path):
                 json_data = json.load(json_file)
                 json_files.append(json_data)
     return json_files
+
+def load_jsonl_file(file_path):
+    """
+    Loads documents from a single JSON Lines (.jsonl) file.
+    Each line is assumed to be an independent JSON object (document).
+    """
+    documents = []
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            for line in f:
+                # Use json.loads() for each line
+                documents.append(json.loads(line))
+    except FileNotFoundError:
+        print(f"Error: File not found at {file_path}")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON on a line in {file_path}: {e}")
+        return []
+        
+    return documents

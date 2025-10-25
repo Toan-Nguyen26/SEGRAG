@@ -13,6 +13,7 @@ import evaluate
 import nltk
 import faiss
 import time
+from neo4j import GraphDatabase
 from qa.narrativeqa.narrativeqa_helpers_function import narrativeqa_prompt_and_answer
 from qa.qasper.qasper_helpers_function import qasper_prompt_and_answer
 from qa.quality.quality_helpers_function import quality_prompt_and_answer
@@ -59,9 +60,58 @@ def search_specific_document(question, doc_id, document_store, faiss_index, top_
 
     # Perform the search on the temporary index using the query embedding
     query_embedding_np = np.array([query_embedding])  # Convert to 2D array as Faiss expects
-    D, I = temp_index.search(query_embedding, top_k)  # type: ignore # D: distances, I: indices
+    D, I = temp_index.search(query_embedding_np, top_k)  # type: ignore # D: distances, I: indices
     
     return I
+
+def retrieve_kg_related_chunks(chunk_ids, doc_ids, document_store, neo4j_uri, neo4j_user, neo4j_pass, top_k=4, max_depth=2, rel_types=None):
+    """Retrieve the top-k related chunks from Neo4j KG based on initial chunk_ids, ranked by shortest hop distance."""
+    driver = GraphDatabase.driver(neo4j_uri, auth=(neo4j_user, neo4j_pass))
+    related_chunks = []
+    
+    with driver.session(database="kg_db") as session:
+        for chunk_id, doc_id in zip(chunk_ids, doc_ids):
+            query = """
+                MATCH (c:Chunk {chunk_id: $chunk_id, doc_id: $doc_id})
+                MATCH (c) <-[:IN_CHUNK]- (e:Entity)
+                MATCH path = (e) -[r:REL*1..$max_depth]-> (related:Entity)
+                MATCH (related) -[:IN_CHUNK]-> (otherChunk:Chunk)
+                WHERE otherChunk <> c
+            """
+            if rel_types:
+                rel_types_str = ', '.join([f"'{rt}'" for rt in rel_types])
+                query += f" AND ALL(r IN relationships(path) WHERE type(r) IN [{rel_types_str}]) "
+            query += """
+                WITH otherChunk, MIN(length(path)) AS min_hops
+                RETURN DISTINCT otherChunk.doc_id AS doc_id, otherChunk.chunk_id AS chunk_id, min_hops
+                ORDER BY min_hops ASC
+                LIMIT $top_k
+            """
+            result = session.run(query, chunk_id=chunk_id, doc_id=doc_id, max_depth=max_depth, top_k=top_k)
+            related_chunks.extend([record.data() for record in result])
+    
+    # Convert to chunk format (same as ask_question_and_retrieve_chunks)
+    chunks_dict = {f"{doc['doc_id']}:{doc['chunk_id']}": doc for doc in document_store}
+    formatted_chunks = []
+    seen = set()
+    for chunk in related_chunks:
+        key = f"{chunk['doc_id']}:{chunk['chunk_id']}"
+        if key not in seen and key in chunks_dict:
+            seen.add(key)
+            doc = chunks_dict[key]
+            formatted_chunks.append({
+                'doc_id': chunk['doc_id'],
+                'chunk_id': chunk['chunk_id'],
+                'text': doc['chunk'],
+                'title': doc.get('title', ''),
+                'distance': None,
+                'min_hops': chunk['min_hops']
+            })
+    
+    # Ensure exactly top_k chunks by sorting and truncating
+    formatted_chunks = sorted(formatted_chunks, key=lambda x: x['min_hops'])[:top_k]
+    return formatted_chunks
+
 # -----------------------------------OPEN AI TESTING-----------------------------------
 def test_openai_api():
     top_chunks = [
@@ -115,15 +165,6 @@ def test_openai_api():
         prompt_tokens = chat_completion.usage.prompt_tokens
         completion_tokens = chat_completion.usage.completion_tokens
 
-        # output = chat_completion.['choices'][0]['message']
-        # total_tokens = chat_completion['usage']['total_tokens']
-        # prompt_tokens = chat_completion['usage']['prompt_tokens']
-        # completion_tokens = chat_completion['usage']['completion_tokens']
-
-        # Calculate cost (estimate)
-        # As per the latest pricing for gpt-4o-mini:
-        # $0.150 per 1,000,000 prompt tokens (input)
-        # $0.600 per 1,000,000 completion tokens (output)
         cost_per_1M_prompt_tokens = 0.150  # $ per 1M input tokens
         cost_per_1M_completion_tokens = 0.600  # $ per 1M output tokens
 
@@ -163,9 +204,15 @@ def qasper_testing(chunk_type='256'):
             golden_answers = qas['answers']
             # Start measuring retrieval time
             start_time = time.time()
-            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
-            # indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
-            # top_chunks = get_top_chunks(indicies, document_store)
+            if args.use_kg: top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, 1, args.is_mul_vector)
+            else: top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
+            if args.use_kg:
+                chunk_ids = [chunk['chunk_id'] for chunk in top_chunks]
+                doc_ids = [chunk['doc_id'] for chunk in top_chunks]
+                kg_chunks = retrieve_kg_related_chunks(chunk_ids, doc_ids, document_store, args.neo4j_uri, args.neo4j_user, args.neo4j_pass, args.kg_depth, args.kg_rel_types)
+                top_chunks.extend(kg_chunks)
+                # If more than top_k, prune to top_k (sort by distance, KG chunks have inf distance)
+                top_chunks = sorted(top_chunks, key=lambda x: x.get('distance', float('inf')))[:args.top_k]
             if args.retrieve:
                 retrieval_time = time.time() - start_time
                 print(f"Current retrieval time {retrieval_time}")
@@ -177,7 +224,6 @@ def qasper_testing(chunk_type='256'):
                 total_f1 += f1_score
             num_qa += 1
             
-
     # Calculate the average scores
     avg_f1 = total_f1 / num_qa if num_qa > 0 else 0
     # Calculate average retrieval time per question
@@ -209,6 +255,8 @@ def narrativeqa_testing(chunk_type='256'):
     # Track costs
     total_retrieval_time = 0
     total_cost = 0
+    top_chunks = []
+    
     for doc in original_documents:
         logging.info(f"Processing document: {doc['title']}")
         # doc_id = doc['id']
@@ -216,9 +264,15 @@ def narrativeqa_testing(chunk_type='256'):
             question = qas['question']
             golden_answers = qas['answers']
             start_time = time.time()
-            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
-            # indicies = indicies = search_specific_document(question=question, doc_id=doc_id, document_store=document_store, faiss_index=index, top_k=args.top_k)
-            # top_chunks = get_top_chunks(indicies, document_store)
+            if args.use_kg: top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, 1, args.is_mul_vector)
+            else: top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
+            if args.use_kg:
+                chunk_ids = [chunk['chunk_id'] for chunk in top_chunks]
+                doc_ids = [chunk['doc_id'] for chunk in top_chunks]
+                kg_chunks = retrieve_kg_related_chunks(chunk_ids, doc_ids, document_store, args.neo4j_uri, args.neo4j_user, args.neo4j_pass, args.kg_depth, args.kg_rel_types)
+                top_chunks.extend(kg_chunks)
+                # If more than top_k, prune to top_k (sort by distance, KG chunks have inf distance)
+                top_chunks = sorted(top_chunks, key=lambda x: x.get('distance', float('inf')))[:args.top_k]
             if args.retrieve:
                 retrieval_time = time.time() - start_time
                 print(f"Current retrieval time {retrieval_time}")
@@ -291,7 +345,15 @@ def quality_testing(chunk_type='256'):
             answer_choices = qas['context']
             golden_answer = qas['answers']
             start_time = time.time()
-            top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
+            if args.use_kg: top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, 1, args.is_mul_vector)
+            else: top_chunks = ask_question_and_retrieve_chunks(question, index, document_store, args.top_k, args.is_mul_vector)
+            if args.use_kg:
+                chunk_ids = [chunk['chunk_id'] for chunk in top_chunks]
+                doc_ids = [chunk['doc_id'] for chunk in top_chunks]
+                kg_chunks = retrieve_kg_related_chunks(chunk_ids, doc_ids, document_store, args.neo4j_uri, args.neo4j_user, args.neo4j_pass, args.kg_depth, args.kg_rel_types)
+                top_chunks.extend(kg_chunks)
+                # If more than top_k, prune to top_k (sort by distance, KG chunks have inf distance)
+                top_chunks = sorted(top_chunks, key=lambda x: x.get('distance', float('inf')))[:args.top_k]
             if args.retrieve:
                 retrieval_time = time.time() - start_time
                 print(f"Current retrieval time {retrieval_time}")
@@ -342,5 +404,13 @@ if __name__ == '__main__':
     parser.add_argument('--retrieve', help="is retieval ?", action='store_true')
     parser.add_argument('--is_mul_vector', help="is retieval ?", action='store_true')   
     parser.add_argument('--original_data', help='Enable data path', type=str, default='data_512_1024')   
+    parser.add_argument('--use_kg', help='Enable KG expansion?', action='store_true')
+    parser.add_argument('--kg_depth', help='Max KG traversal depth', type=int, default=2)
+    parser.add_argument('--kg_rel_types', help='Comma-separated KG relation types', type=str, default=None)
+    parser.add_argument('--neo4j_uri', help='Neo4j URI', type=str, default=os.environ.get('NEO4J_URI', 'bolt://localhost:7687'))
+    parser.add_argument('--neo4j_user', help='Neo4j username', type=str, default=os.environ.get('NEO4J_USER', 'neo4j'))
+    parser.add_argument('--neo4j_pass', help='Neo4j password', type=str, default=os.environ.get('NEO4J_PASS', 'password'))
     args = parser.parse_args() 
+    if args.kg_rel_types:
+        args.kg_rel_types = args.kg_rel_types.split(',')
     main(args)
