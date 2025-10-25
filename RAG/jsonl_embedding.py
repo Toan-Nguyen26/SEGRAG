@@ -9,11 +9,6 @@ from sentence_transformers import SentenceTransformer, util
 import uuid
 from argparse import ArgumentParser
 from cluster.cluster_helper_functions import combine_sentences
-from langchain.text_splitter import RecursiveCharacterTextSplitter, CharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader, DirectoryLoader
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import GPT4AllEmbeddings
-from langchain.docstore.document import Document
 import spacy
 from segment_clustering import cluster_segment
 import logging
